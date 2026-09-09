@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IStoryChapterDao">
+    <resultMap id="storyChapterMap" type="cn.ninth.novel.infrastructure.dao.po.StoryChapterPO">
+        <id column="id" property="id"/>
+        <result column="project_id" property="projectId"/>
+        <result column="chapter_plan_id" property="chapterPlanId"/>
+        <result column="chapter_number" property="chapterNumber"/>
+        <result column="title" property="title"/>
+        <result column="content" property="content"/>
+        <result column="word_count" property="wordCount"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="chapterColumns">
+        id, project_id, chapter_plan_id, chapter_number, title, content,
+        word_count, status, created_at, updated_at
+    </sql>
+
+    <insert id="insertOrUpdate" parameterType="cn.ninth.novel.infrastructure.dao.po.StoryChapterPO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO story_chapter
+        (project_id, chapter_plan_id, chapter_number, title, content, word_count, status)
+        VALUES
+        (#{projectId}, #{chapterPlanId}, #{chapterNumber}, #{title}, #{content}, #{wordCount}, #{status})
+        ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
+            chapter_plan_id = VALUES(chapter_plan_id),
+            title = VALUES(title),
+            content = VALUES(content),
+            word_count = VALUES(word_count),
+            status = VALUES(status)
+    </insert>
+    <delete id="deleteByProjectIdAndChapterNumber">
+        DELETE FROM story_chapter WHERE project_id = #{projectId} AND chapter_number = #{chapterNumber}
+    </delete>
+
+    <select id="queryByProjectIdAndChapterNumber" resultMap="storyChapterMap">
+        SELECT <include refid="chapterColumns"/>
+        FROM story_chapter
+        WHERE project_id = #{projectId} AND chapter_number = #{chapterNumber}
+    </select>
+
+    <update id="updateStatusIfCurrent">
+        UPDATE story_chapter
+        SET status = #{nextStatus}
+        WHERE project_id = #{projectId}
+          AND chapter_number = #{chapterNumber}
+          AND status = #{currentStatus}
+    </update>
+
+    <select id="queryByProjectId" resultMap="storyChapterMap">
+        SELECT <include refid="chapterColumns"/>
+        FROM story_chapter
+        WHERE project_id = #{projectId}
+        ORDER BY chapter_number ASC
+    </select>
+
+    <select id="queryByProjectIdAndContentLike" resultMap="storyChapterMap">
+        SELECT <include refid="chapterColumns"/>
+        FROM story_chapter
+        WHERE project_id = #{projectId}
+          AND (content LIKE CONCAT('%', #{keyword}, '%')
+               OR title LIKE CONCAT('%', #{keyword}, '%'))
+        ORDER BY chapter_number ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countByProjectId" resultType="int">
+        SELECT COUNT(*) FROM story_chapter WHERE project_id = #{projectId}
+    </select>
+
+    <select id="countByProjectIdAndChapterNumberGreaterThan" resultType="int">
+        SELECT COUNT(*)
+        FROM story_chapter
+        WHERE project_id = #{projectId}
+          AND chapter_number &gt; #{chapterNumber}
+    </select>
+
+    <select id="queryMaxChapterNumber" resultType="java.lang.Integer">
+        SELECT COALESCE(MAX(chapter_number), 0)
+        FROM story_chapter
+        WHERE project_id = #{projectId}
+    </select>
+</mapper>

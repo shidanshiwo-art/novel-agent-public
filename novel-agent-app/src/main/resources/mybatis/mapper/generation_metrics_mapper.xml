@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IGenerationMetricsDao">
+    <resultMap id="generationMetricsMap" type="cn.ninth.novel.infrastructure.dao.po.GenerationMetricsPO">
+        <id column="project_id" property="projectId"/>
+        <id column="chapter_number" property="chapterNumber"/>
+        <id column="generation_session_id" property="generationSessionId"/>
+        <result column="draft_calls" property="draftCalls"/>
+        <result column="review_calls" property="reviewCalls"/>
+        <result column="revise_calls" property="reviseCalls"/>
+        <result column="compression_calls" property="compressionCalls"/>
+        <result column="revise_rounds" property="reviseRounds"/>
+        <result column="retry_count" property="retryCount"/>
+        <result column="human_intervened" property="humanIntervened"/>
+        <result column="generation_duration_ms" property="generationDurationMs"/>
+        <result column="input_tokens" property="inputTokens"/>
+        <result column="output_tokens" property="outputTokens"/>
+        <result column="total_tokens" property="totalTokens"/>
+        <result column="final_word_count" property="finalWordCount"/>
+        <result column="generation_started_at" property="startedAt"/>
+        <result column="generation_ended_at" property="endedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="generationMetricsColumns">
+        project_id, chapter_number, generation_session_id,
+        draft_calls, review_calls, revise_calls, compression_calls,
+        revise_rounds, retry_count, human_intervened, generation_duration_ms,
+        input_tokens, output_tokens, total_tokens, final_word_count,
+        generation_started_at, generation_ended_at, created_at, updated_at
+    </sql>
+
+    <insert id="insertOrUpdate" parameterType="cn.ninth.novel.infrastructure.dao.po.GenerationMetricsPO">
+        INSERT INTO generation_metrics
+            (project_id, chapter_number, generation_session_id,
+             draft_calls, review_calls, revise_calls, compression_calls,
+             revise_rounds, retry_count, human_intervened, generation_duration_ms,
+             input_tokens, output_tokens, total_tokens, final_word_count,
+             generation_started_at, generation_ended_at)
+        VALUES
+            (#{projectId}, #{chapterNumber}, #{generationSessionId},
+             #{draftCalls}, #{reviewCalls}, #{reviseCalls}, #{compressionCalls},
+             #{reviseRounds}, #{retryCount}, #{humanIntervened}, #{generationDurationMs},
+             #{inputTokens}, #{outputTokens}, #{totalTokens}, #{finalWordCount},
+             #{startedAt}, #{endedAt})
+        ON DUPLICATE KEY UPDATE
+            draft_calls = VALUES(draft_calls),
+            review_calls = VALUES(review_calls),
+            revise_calls = VALUES(revise_calls),
+            compression_calls = VALUES(compression_calls),
+            revise_rounds = VALUES(revise_rounds),
+            retry_count = VALUES(retry_count),
+            human_intervened = VALUES(human_intervened),
+            generation_duration_ms = VALUES(generation_duration_ms),
+            input_tokens = VALUES(input_tokens),
+            output_tokens = VALUES(output_tokens),
+            total_tokens = VALUES(total_tokens),
+            final_word_count = VALUES(final_word_count),
+            generation_started_at = COALESCE(generation_metrics.generation_started_at, VALUES(generation_started_at)),
+            generation_ended_at = COALESCE(VALUES(generation_ended_at), generation_metrics.generation_ended_at)
+    </insert>
+
+    <select id="queryByIdentity" resultMap="generationMetricsMap">
+        SELECT <include refid="generationMetricsColumns"/>
+        FROM generation_metrics
+        WHERE project_id = #{projectId}
+          AND chapter_number = #{chapterNumber}
+          AND generation_session_id = #{generationSessionId}
+    </select>
+
+    <select id="queryByChapter" resultMap="generationMetricsMap">
+        SELECT <include refid="generationMetricsColumns"/>
+        FROM generation_metrics
+        WHERE project_id = #{projectId}
+          AND chapter_number = #{chapterNumber}
+        ORDER BY updated_at DESC, created_at DESC, generation_session_id DESC
+    </select>
+
+    <select id="queryProjectSummary" resultType="cn.ninth.novel.infrastructure.dao.po.GenerationMetricsSummaryPO">
+        SELECT COUNT(*) AS session_count,
+               COALESCE(SUM(draft_calls), 0) AS draft_calls,
+               COALESCE(SUM(review_calls), 0) AS review_calls,
+               COALESCE(SUM(revise_calls), 0) AS revise_calls,
+               COALESCE(SUM(compression_calls), 0) AS compression_calls,
+               COALESCE(SUM(revise_rounds), 0) AS revise_rounds,
+               COALESCE(SUM(retry_count), 0) AS retry_count,
+               COALESCE(SUM(CASE WHEN human_intervened THEN 1 ELSE 0 END), 0)
+                   AS human_intervened_count,
+               COALESCE(SUM(generation_duration_ms), 0) AS generation_duration_ms,
+               CASE WHEN COUNT(input_tokens) = 0 THEN NULL ELSE SUM(input_tokens) END
+                   AS input_tokens,
+               CASE WHEN COUNT(output_tokens) = 0 THEN NULL ELSE SUM(output_tokens) END
+                   AS output_tokens,
+               CASE WHEN COUNT(total_tokens) = 0 THEN NULL ELSE SUM(total_tokens) END
+                   AS total_tokens,
+               COALESCE(SUM(final_word_count), 0) AS final_word_count,
+               MIN(generation_started_at) AS started_at,
+               MAX(generation_ended_at) AS ended_at
+        FROM generation_metrics
+        WHERE project_id = #{projectId}
+    </select>
+</mapper>

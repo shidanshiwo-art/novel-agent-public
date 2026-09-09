@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IChapterPlanDao">
+    <resultMap id="chapterPlanMap" type="cn.ninth.novel.infrastructure.dao.po.ChapterPlanPO">
+        <id column="id" property="id"/>
+        <result column="project_id" property="projectId"/>
+        <result column="outline_node_id" property="outlineNodeId"/>
+        <result column="chapter_number" property="chapterNumber"/>
+        <result column="title" property="title"/>
+        <result column="summary" property="summary"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="chapterPlanColumns">
+        id, project_id, outline_node_id, chapter_number, title, summary,
+        status, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="cn.ninth.novel.infrastructure.dao.po.ChapterPlanPO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO chapter_plan
+            (project_id, outline_node_id, chapter_number, title, summary, status)
+        VALUES
+            (#{projectId}, #{outlineNodeId}, #{chapterNumber}, #{title}, #{summary}, #{status})
+    </insert>
+
+    <select id="queryByChapterNumber" resultMap="chapterPlanMap">
+        SELECT <include refid="chapterPlanColumns"/>
+        FROM chapter_plan
+        WHERE project_id = #{projectId} AND chapter_number = #{chapterNumber}
+    </select>
+
+    <select id="queryByOutlineNode" resultMap="chapterPlanMap">
+        SELECT <include refid="chapterPlanColumns"/>
+        FROM chapter_plan
+        WHERE project_id = #{projectId} AND outline_node_id = #{outlineNodeId}
+        ORDER BY chapter_number ASC
+    </select>
+
+    <select id="queryByProject" resultMap="chapterPlanMap">
+        SELECT <include refid="chapterPlanColumns"/>
+        FROM chapter_plan
+        WHERE project_id = #{projectId}
+        ORDER BY chapter_number ASC
+    </select>
+
+    <update id="update" parameterType="cn.ninth.novel.infrastructure.dao.po.ChapterPlanPO">
+        UPDATE chapter_plan
+        SET outline_node_id = #{outlineNodeId},
+            chapter_number = #{chapterNumber},
+            title = #{title},
+            summary = #{summary},
+            status = #{status}
+        WHERE project_id = #{projectId} AND id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE chapter_plan
+        SET status = #{status}
+        WHERE project_id = #{projectId} AND id = #{id}
+    </update>
+
+    <update id="updateStatusIfCurrent">
+        UPDATE chapter_plan
+        SET status = #{status}
+        WHERE project_id = #{projectId}
+          AND id = #{id}
+          AND status = #{currentStatus}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM chapter_plan
+        WHERE project_id = #{projectId} AND id = #{id}
+    </delete>
+</mapper>

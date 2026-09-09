@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IStorySummaryDao">
+    <resultMap id="storySummaryMap" type="cn.ninth.novel.infrastructure.dao.po.StorySummaryPO">
+        <id column="id" property="id"/>
+        <result column="project_id" property="projectId"/>
+        <result column="chapter_id" property="chapterId"/>
+        <result column="chapter_number" property="chapterNumber"/>
+        <result column="short_summary" property="shortSummary"/>
+        <result column="key_events_json" property="keyEventsJson"/>
+        <result column="unresolved_questions_json" property="unresolvedQuestionsJson"/>
+        <result column="ending_hook" property="endingHook"/>
+        <result column="story_state_snapshot_json" property="storyStateSnapshotJson"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="summaryColumns">
+        id, project_id, chapter_id, chapter_number, short_summary, key_events_json,
+        unresolved_questions_json,
+        ending_hook, story_state_snapshot_json, status, created_at, updated_at
+    </sql>
+
+    <insert id="insertOrUpdate" parameterType="cn.ninth.novel.infrastructure.dao.po.StorySummaryPO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO story_summary
+        (project_id, chapter_id, chapter_number, short_summary, key_events_json,
+         unresolved_questions_json,
+         ending_hook, story_state_snapshot_json, status)
+        VALUES
+        (#{projectId}, #{chapterId}, #{chapterNumber}, #{shortSummary}, #{keyEventsJson},
+         #{unresolvedQuestionsJson},
+         #{endingHook}, #{storyStateSnapshotJson}, #{status})
+        ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
+            chapter_id = VALUES(chapter_id),
+            short_summary = VALUES(short_summary),
+            key_events_json = VALUES(key_events_json),
+            unresolved_questions_json = VALUES(unresolved_questions_json),
+            ending_hook = VALUES(ending_hook),
+            story_state_snapshot_json = VALUES(story_state_snapshot_json),
+            status = VALUES(status)
+    </insert>
+
+    <select id="queryByProjectIdAndChapterNumber" resultMap="storySummaryMap">
+        SELECT <include refid="summaryColumns"/>
+        FROM story_summary
+        WHERE project_id = #{projectId} AND chapter_number = #{chapterNumber}
+    </select>
+
+    <update id="markStale">
+        UPDATE story_summary
+        SET status = 'STALE'
+        WHERE project_id = #{projectId} AND chapter_number = #{chapterNumber}
+    </update>
+    <delete id="deleteByProjectIdAndChapterNumber">DELETE FROM story_summary WHERE project_id = #{projectId} AND chapter_number = #{chapterNumber}</delete>
+
+    <select id="queryRecent" resultMap="storySummaryMap">
+        SELECT s.id, s.project_id, s.chapter_id, s.chapter_number, s.short_summary,
+               s.key_events_json,
+               s.unresolved_questions_json,
+               s.ending_hook, s.story_state_snapshot_json,
+               s.status, s.created_at, s.updated_at
+        FROM story_summary s
+        JOIN story_chapter c
+          ON c.project_id = s.project_id
+         AND c.id = s.chapter_id
+         AND c.chapter_number = s.chapter_number
+        WHERE s.project_id = #{projectId}
+          AND s.chapter_number &lt; #{beforeChapter}
+          AND s.status IN ('GENERATED', 'VERIFIED')
+          AND c.status &lt;&gt; 'DIRTY'
+        ORDER BY s.chapter_number DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="queryAllValidByProjectId" resultMap="storySummaryMap">
+        SELECT s.id, s.project_id, s.chapter_id, s.chapter_number, s.short_summary,
+               s.key_events_json,
+               s.unresolved_questions_json,
+               s.ending_hook, s.story_state_snapshot_json,
+               s.status, s.created_at, s.updated_at
+        FROM story_summary s
+        JOIN story_chapter c
+          ON c.project_id = s.project_id
+         AND c.id = s.chapter_id
+         AND c.chapter_number = s.chapter_number
+        WHERE s.project_id = #{projectId}
+          AND s.status IN ('GENERATED', 'VERIFIED')
+          AND c.status &lt;&gt; 'DIRTY'
+        ORDER BY s.chapter_number ASC
+    </select>
+</mapper>

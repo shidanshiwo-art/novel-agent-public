@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.INovelProjectDao">
+    <resultMap id="novelProjectMap" type="cn.ninth.novel.infrastructure.dao.po.NovelProjectPO">
+        <id column="id" property="id"/>
+        <result column="project_code" property="projectCode"/>
+        <result column="title" property="title"/>
+        <result column="genre" property="genre"/>
+        <result column="target_chapter_count" property="targetChapterCount"/>
+        <result column="words_per_chapter" property="wordsPerChapter"/>
+        <result column="current_chapter_number" property="currentChapterNumber"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.ninth.novel.infrastructure.dao.po.NovelProjectPO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO novel_project
+        (project_code, title, genre, target_chapter_count, words_per_chapter,
+         current_chapter_number, status)
+        VALUES
+        (#{projectCode}, #{title}, #{genre}, #{targetChapterCount}, #{wordsPerChapter},
+         #{currentChapterNumber}, #{status})
+    </insert>
+
+    <update id="update" parameterType="cn.ninth.novel.infrastructure.dao.po.NovelProjectPO">
+        UPDATE novel_project
+        SET title = #{title},
+            genre = #{genre},
+            target_chapter_count = #{targetChapterCount},
+            words_per_chapter = #{wordsPerChapter},
+            current_chapter_number = #{currentChapterNumber},
+            status = #{status}
+        WHERE id = #{id}
+    </update>
+
+    <update id="advanceProgress">
+        UPDATE novel_project
+        SET current_chapter_number = GREATEST(current_chapter_number, #{chapterNumber}),
+            status = 'WRITING'
+        WHERE id = #{projectId}
+    </update>
+
+    <update id="updateCurrentChapterNumber">
+        UPDATE novel_project
+        SET current_chapter_number = #{chapterNumber}
+        WHERE id = #{projectId}
+    </update>
+
+    <select id="queryByProjectCode" resultMap="novelProjectMap">
+        SELECT id, project_code, title, genre, target_chapter_count, words_per_chapter,
+               current_chapter_number, status, created_at, updated_at
+        FROM novel_project
+        WHERE project_code = #{projectCode}
+    </select>
+
+    <select id="queryAll" resultMap="novelProjectMap">
+        SELECT id, project_code, title, genre, target_chapter_count, words_per_chapter,
+               current_chapter_number, status, created_at, updated_at
+        FROM novel_project
+        ORDER BY updated_at DESC, id DESC
+    </select>
+
+    <delete id="deleteByProjectCode">
+        DELETE FROM novel_project WHERE project_code = #{projectCode}
+    </delete>
+</mapper>

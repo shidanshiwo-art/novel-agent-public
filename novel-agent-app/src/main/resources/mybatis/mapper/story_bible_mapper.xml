@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IStoryBibleDao">
+    <resultMap id="storyBibleMap" type="cn.ninth.novel.infrastructure.dao.po.StoryBiblePO">
+        <id column="id" property="id"/>
+        <result column="project_id" property="projectId"/>
+        <result column="one_sentence_premise" property="oneSentencePremise"/>
+        <result column="core_theme" property="coreTheme"/>
+        <result column="main_conflict" property="mainConflict"/>
+        <result column="ending_direction" property="endingDirection"/>
+        <result column="world_background" property="worldBackground"/>
+        <result column="power_system_json" property="powerSystemJson"/>
+        <result column="hard_rules_json" property="hardRulesJson"/>
+        <result column="style_guide" property="styleGuide"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="cn.ninth.novel.infrastructure.dao.po.StoryBiblePO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO story_bible
+        (project_id, one_sentence_premise, core_theme, main_conflict, ending_direction,
+         world_background, power_system_json, hard_rules_json, style_guide, status)
+        VALUES
+        (#{projectId}, #{oneSentencePremise}, #{coreTheme}, #{mainConflict}, #{endingDirection},
+         #{worldBackground}, #{powerSystemJson}, #{hardRulesJson}, #{styleGuide}, #{status})
+    </insert>
+
+    <update id="updateByProjectId" parameterType="cn.ninth.novel.infrastructure.dao.po.StoryBiblePO">
+        UPDATE story_bible
+        SET one_sentence_premise = #{oneSentencePremise},
+            core_theme = #{coreTheme},
+            main_conflict = #{mainConflict},
+            ending_direction = #{endingDirection},
+            world_background = #{worldBackground},
+            power_system_json = #{powerSystemJson},
+            hard_rules_json = #{hardRulesJson},
+            style_guide = #{styleGuide},
+            status = #{status}
+        WHERE project_id = #{projectId}
+    </update>
+
+    <select id="queryByProjectId" resultMap="storyBibleMap">
+        SELECT id, project_id, one_sentence_premise, core_theme, main_conflict,
+               ending_direction, world_background, power_system_json, hard_rules_json,
+               style_guide, status, created_at, updated_at
+        FROM story_bible
+        WHERE project_id = #{projectId}
+    </select>
+
+    <delete id="deleteByProjectId">
+        DELETE FROM story_bible WHERE project_id = #{projectId}
+    </delete>
+</mapper>

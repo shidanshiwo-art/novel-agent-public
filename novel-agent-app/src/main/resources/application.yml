@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: novel-agent
+  profiles:
+    default: dev
+
+
+logging:
+  config: classpath:logback-spring.xml
+  file:
+    path: ./data/log
+
+mybatis:
+  config-location: classpath:/mybatis/config/mybatis-config.xml
+  mapper-locations: classpath:/mybatis/mapper/*.xml
+
+novel:
+  model:
+    structured-timeouts:
+      CHARACTER_GENERATION: 180s
+      CHAPTER_PLAN: 180s
+      ROOT_OUTLINE: 240s
+      NEXT_VOLUME: 240s
+      NEXT_CHAPTER_OUTLINE: 240s
+      REVIEW: 300s
+      COMPRESSION: 180s
+      STORY_BIBLE_INIT: 180s
+      STORY_BIBLE_REVISION: 180s
+      VOLUME_OUTLINE: 240s
+      ARC_REGENERATION: 240s
+  chapter:
+    profile: CHAPTER
+    model: ${CHAPTER_MODEL:${spring.ai.openai.chat.model:deepseek-v4-flash}}
+    temperature: 0.7
+    reasoning: LOW
+    stage-reasoning:
+      DRAFT: LOW
+      REVISION: LOW
+      REVIEW: MEDIUM
+      COMPRESSION: OFF
+  planning:
+    stage-reasoning:
+      CHARACTER_GENERATION: LOW
+      CHAPTER_PLAN: MEDIUM
+      ROOT_OUTLINE: HIGH
+      NEXT_VOLUME: HIGH
+      NEXT_CHAPTER_OUTLINE: MEDIUM
+      VOLUME_OUTLINE: MEDIUM
+      ARC_REGENERATION: MEDIUM
+    models:
+      fast-structured:
+        model: ${PLANNING_FAST_MODEL:${spring.ai.openai.chat.model:deepseek-v4-flash}}
+        temperature: 0.2
+        reasoning: OFF
+      creative-planning:
+        model: ${PLANNING_CREATIVE_MODEL:${spring.ai.openai.chat.model:deepseek-v4-flash}}
+        temperature: 0.5
+        reasoning: MEDIUM

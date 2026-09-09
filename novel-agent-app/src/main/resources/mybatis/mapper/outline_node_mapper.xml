@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IOutlineNodeDao">
+    <resultMap id="outlineNodeMap" type="cn.ninth.novel.infrastructure.dao.po.OutlineNodePO">
+        <id column="id" property="id"/>
+        <result column="project_id" property="projectId"/>
+        <result column="parent_id" property="parentId"/>
+        <result column="node_code" property="nodeCode"/>
+        <result column="node_kind" property="nodeKind"/>
+        <result column="sequence_no" property="sequenceNo"/>
+        <result column="start_chapter" property="startChapter"/>
+        <result column="end_chapter" property="endChapter"/>
+        <result column="title" property="title"/>
+        <result column="summary" property="summary"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="outlineColumns">
+        id, project_id, parent_id, node_code, node_kind, sequence_no,
+        start_chapter, end_chapter, title, summary, status, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="cn.ninth.novel.infrastructure.dao.po.OutlineNodePO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO outline_node
+        (project_id, parent_id, node_code, node_kind, sequence_no,
+         start_chapter, end_chapter, title, summary, status)
+        VALUES
+        (#{projectId}, #{parentId}, #{nodeCode}, #{nodeKind}, #{sequenceNo},
+         #{startChapter}, #{endChapter}, #{title}, #{summary}, #{status})
+    </insert>
+
+    <update id="update" parameterType="cn.ninth.novel.infrastructure.dao.po.OutlineNodePO">
+        UPDATE outline_node
+        SET parent_id = #{parentId}, node_kind = #{nodeKind}, sequence_no = #{sequenceNo},
+            start_chapter = #{startChapter}, end_chapter = #{endChapter},
+            title = #{title}, summary = #{summary}, status = #{status}
+        WHERE project_id = #{projectId} AND id = #{id}
+    </update>
+
+    <delete id="deleteOne">
+        DELETE FROM outline_node
+        WHERE project_id = #{projectId} AND id = #{id}
+    </delete>
+
+    <select id="queryByCode" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId} AND node_code = #{nodeCode}
+    </select>
+
+    <select id="queryByCodeForUpdate" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId} AND node_code = #{nodeCode}
+        FOR UPDATE
+    </select>
+
+    <select id="queryById" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId} AND id = #{id}
+    </select>
+
+    <select id="queryRoot" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId} AND parent_id IS NULL
+        ORDER BY sequence_no, id
+        LIMIT 1
+    </select>
+
+    <select id="queryChildren" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId} AND parent_id = #{parentId}
+        ORDER BY sequence_no, id
+    </select>
+
+    <select id="queryChildrenForUpdate" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId} AND parent_id = #{parentId}
+        ORDER BY sequence_no, id
+        FOR UPDATE
+    </select>
+
+    <select id="querySiblings" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId}
+        <choose>
+            <when test="parentId == null">
+                AND parent_id IS NULL
+            </when>
+            <otherwise>
+                AND parent_id = #{parentId}
+            </otherwise>
+        </choose>
+        ORDER BY sequence_no, id
+    </select>
+
+    <select id="queryByProject" resultMap="outlineNodeMap">
+        SELECT <include refid="outlineColumns"/>
+        FROM outline_node
+        WHERE project_id = #{projectId}
+        ORDER BY parent_id, sequence_no, id
+    </select>
+
+    <select id="queryMaxSequenceNo" resultType="java.lang.Integer">
+        SELECT COALESCE(MAX(sequence_no), 0)
+        FROM outline_node
+        WHERE project_id = #{projectId}
+        <choose>
+            <when test="parentId == null">
+                AND parent_id IS NULL
+            </when>
+            <otherwise>
+                AND parent_id = #{parentId}
+            </otherwise>
+        </choose>
+    </select>
+</mapper>

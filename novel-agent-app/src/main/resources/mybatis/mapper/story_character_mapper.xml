@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IStoryCharacterDao">
+    <resultMap id="storyCharacterMap" type="cn.ninth.novel.infrastructure.dao.po.StoryCharacterPO">
+        <id column="id" property="id"/>
+        <result column="project_id" property="projectId"/>
+        <result column="character_code" property="characterCode"/>
+        <result column="name" property="name"/>
+        <result column="role_type" property="roleType"/>
+        <result column="gender" property="gender"/>
+        <result column="age_description" property="ageDescription"/>
+        <result column="appearance" property="appearance"/>
+        <result column="personality" property="personality"/>
+        <result column="background_story" property="backgroundStory"/>
+        <result column="note" property="note"/>
+        <result column="current_state_json" property="currentStateJson"/>
+        <result column="life_status" property="lifeStatus"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="characterColumns">
+        id, project_id, character_code, name, role_type, gender,
+        age_description, appearance, personality, background_story, note, current_state_json,
+        life_status, status, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="cn.ninth.novel.infrastructure.dao.po.StoryCharacterPO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO story_character
+        (project_id, character_code, name, role_type, gender,
+         age_description, appearance, personality, background_story, note, current_state_json, life_status, status)
+        VALUES
+        (#{projectId}, #{characterCode}, #{name}, #{roleType}, #{gender},
+         #{ageDescription}, #{appearance}, #{personality}, #{backgroundStory}, #{note}, #{currentStateJson}, #{lifeStatus}, #{status})
+    </insert>
+
+    <update id="update" parameterType="cn.ninth.novel.infrastructure.dao.po.StoryCharacterPO">
+        UPDATE story_character
+        SET name = #{name}, role_type = #{roleType}, gender = #{gender},
+            age_description = #{ageDescription}, appearance = #{appearance}, personality = #{personality},
+            background_story = #{backgroundStory}, note = #{note}, current_state_json = #{currentStateJson},
+            life_status = #{lifeStatus}, status = #{status}
+        WHERE project_id = #{projectId} AND character_code = #{characterCode}
+    </update>
+
+    <select id="queryByCharacterCode" resultMap="storyCharacterMap">
+        SELECT <include refid="characterColumns"/>
+        FROM story_character
+        WHERE project_id = #{projectId} AND character_code = #{characterCode}
+    </select>
+
+    <select id="queryByCharacterCodeForUpdate" resultMap="storyCharacterMap">
+        SELECT <include refid="characterColumns"/>
+        FROM story_character
+        WHERE project_id = #{projectId} AND character_code = #{characterCode}
+        FOR UPDATE
+    </select>
+
+    <select id="queryByProjectId" resultMap="storyCharacterMap">
+        SELECT <include refid="characterColumns"/>
+        FROM story_character
+        WHERE project_id = #{projectId}
+        ORDER BY CASE role_type WHEN 'MALE_LEAD' THEN 0 ELSE 1 END, id
+    </select>
+
+    <select id="queryMaleLead" resultMap="storyCharacterMap">
+        SELECT <include refid="characterColumns"/>
+        FROM story_character
+        WHERE project_id = #{projectId} AND role_type = 'MALE_LEAD'
+        LIMIT 1
+    </select>
+
+    <delete id="deleteByProjectIdAndCharacterCode">
+        DELETE FROM story_character
+        WHERE project_id = #{projectId} AND character_code = #{characterCode}
+    </delete>
+
+    <delete id="deleteByProjectId">
+        DELETE FROM story_character WHERE project_id = #{projectId}
+    </delete>
+</mapper>

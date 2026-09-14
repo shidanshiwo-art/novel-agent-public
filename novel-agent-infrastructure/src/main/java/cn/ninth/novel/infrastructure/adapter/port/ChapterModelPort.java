@@ -461,6 +461,26 @@ public class ChapterModelPort implements IChapterModelPort {
             String stage,
             int attempt
     ) {
+        return callWithRawResponse(
+                systemPrompt,
+                userPrompt,
+                responseType,
+                stage,
+                attempt,
+                null
+        );
+    }
+
+    @Override
+    public <T> ChapterModelResponse<T> callWithRawResponse(
+            String systemPrompt,
+            String userPrompt,
+            Class<T> responseType,
+            String stage,
+            int attempt,
+            Boolean reasoningEnabledOverride
+    ) {
+        ModelStageConfig effectiveConfig = effectiveConfig(stage, reasoningEnabledOverride);
         ChapterTokenUsage accumulatedUsage = null;
         for (int retry = 0; ; retry++) {
             try {
@@ -469,7 +489,8 @@ public class ChapterModelPort implements IChapterModelPort {
                         userPrompt,
                         responseType,
                         stage,
-                        normalizeAttempt(attempt) + retry
+                        normalizeAttempt(attempt) + retry,
+                        effectiveConfig
                 );
                 return new ChapterModelResponse<>(
                         response.value(),
@@ -498,7 +519,12 @@ public class ChapterModelPort implements IChapterModelPort {
     }
 
     private <T> ChapterModelResponse<T> callOnce(
-            String systemPrompt, String userPrompt, Class<T> responseType, String stage, int attempt
+            String systemPrompt,
+            String userPrompt,
+            Class<T> responseType,
+            String stage,
+            int attempt,
+            ModelStageConfig effectiveConfig
     ) {
         String normalizedStage = normalizeStage(stage);
         int normalizedAttempt = normalizeAttempt(attempt);
@@ -519,14 +545,15 @@ public class ChapterModelPort implements IChapterModelPort {
                 userPrompt,
                 normalizedStage,
                 normalizedAttempt,
-                responseTypeName
+                responseTypeName,
+                chapterConfiguration(normalizedStage, effectiveConfig)
         );
 
         try {
             responses = chatClient.prompt()
                     .system(systemPrompt)
                     .user(userPrompt)
-                    .options(optionsForStage(normalizedStage))
+                    .options(optionsForStage(effectiveConfig))
                     .stream()
                     .chatResponse();
             if (responses == null) {
@@ -604,7 +631,8 @@ public class ChapterModelPort implements IChapterModelPort {
                     chunkCount.get(),
                     contentBuilder.length(),
                     lastResponse.get(),
-                    exception
+                    exception,
+                    chapterConfiguration(normalizedStage, effectiveConfig)
             );
             throw modelRequestFailure(failureType, exception);
         }
@@ -641,7 +669,8 @@ public class ChapterModelPort implements IChapterModelPort {
                     chunkCount.get(),
                     contentBuilder.length(),
                     lastResponse.get(),
-                    emptyResponse
+                    emptyResponse,
+                    chapterConfiguration(normalizedStage, effectiveConfig)
             );
             throw emptyResponse;
         }
@@ -679,7 +708,8 @@ public class ChapterModelPort implements IChapterModelPort {
                     chunkCount.get(),
                     content.length(),
                     lastResponse.get(),
-                    null
+                    null,
+                    chapterConfiguration(normalizedStage, effectiveConfig)
             );
             return new ChapterModelResponse<>(
                     result,
@@ -717,7 +747,8 @@ public class ChapterModelPort implements IChapterModelPort {
                     chunkCount.get(),
                     length(content),
                     lastResponse.get(),
-                    structuredFailure
+                    structuredFailure,
+                    chapterConfiguration(normalizedStage, effectiveConfig)
             );
             logStructuredParseDebug(failureType, content, e);
             throw structuredFailure;
@@ -771,7 +802,46 @@ public class ChapterModelPort implements IChapterModelPort {
             ChatClient.CallResponseSpec response,
             Throwable exception
     ) {
-        ChapterModelConfigurationSummary configuration = chapterConfiguration(stage);
+        logCallResult(
+                failed,
+                status,
+                failureType,
+                mode,
+                stage,
+                attempt,
+                responseType,
+                systemPrompt,
+                userPrompt,
+                requestCostMs,
+                readCostMs,
+                parseCostMs,
+                totalCostMs,
+                contentChars,
+                response,
+                exception,
+                chapterConfiguration(stage)
+        );
+    }
+
+    private void logCallResult(
+            boolean failed,
+            String status,
+            String failureType,
+            String mode,
+            String stage,
+            int attempt,
+            String responseType,
+            String systemPrompt,
+            String userPrompt,
+            Long requestCostMs,
+            Long readCostMs,
+            Long parseCostMs,
+            Long totalCostMs,
+            Integer contentChars,
+            ChatClient.CallResponseSpec response,
+            Throwable exception,
+            ChapterModelConfigurationSummary configuration
+    ) {
         String message = ModelObservabilityLogFormatter.format(
                 status,
                 mode,
@@ -837,7 +907,54 @@ public class ChapterModelPort implements IChapterModelPort {
             ChatResponse response,
             Throwable exception
     ) {
-        ChapterModelConfigurationSummary configuration = chapterConfiguration(stage);
+        logCallResult(
+                failed,
+                status,
+                failureType,
+                mode,
+                stage,
+                attempt,
+                responseType,
+                systemPrompt,
+                userPrompt,
+                requestCostMs,
+                contentReadMs,
+                parseCostMs,
+                firstResponseMs,
+                ttftMs,
+                generationMs,
+                totalCostMs,
+                chunkCount,
+                contentChars,
+                response,
+                exception,
+                chapterConfiguration(stage)
+        );
+    }
+
+    private void logCallResult(
+            boolean failed,
+            String status,
+            String failureType,
+            String mode,
+            String stage,
+            int attempt,
+            String responseType,
+            String systemPrompt,
+            String userPrompt,
+            Long requestCostMs,
+            Long contentReadMs,
+            Long parseCostMs,
+            Long firstResponseMs,
+            Long ttftMs,
+            Long generationMs,
+            Long totalCostMs,
+            Integer chunkCount,
+            Integer contentChars,
+            ChatResponse response,
+            Throwable exception,
+            ChapterModelConfigurationSummary configuration
+    ) {
         String message = ModelObservabilityLogFormatter.format(
                 status,
                 mode,
@@ -898,7 +1015,24 @@ public class ChapterModelPort implements IChapterModelPort {
             int attempt,
             String responseType
     ) {
-        ChapterModelConfigurationSummary configuration = chapterConfiguration(stage);
+        logStructuredStart(
+                systemPrompt,
+                userPrompt,
+                stage,
+                attempt,
+                responseType,
+                chapterConfiguration(stage)
+        );
+    }
+
+    private void logStructuredStart(
+            String systemPrompt,
+            String userPrompt,
+            String stage,
+            int attempt,
+            String responseType,
+            ChapterModelConfigurationSummary configuration
+    ) {
         String message = ModelObservabilityLogFormatter.format(
                 "start",
                 "structured",
@@ -1292,6 +1426,25 @@ public class ChapterModelPort implements IChapterModelPort {
         return buildOptions(chapterModelProperties.forStage(stage));
     }
 
+    private ModelStageConfig effectiveConfig(
+            String stage,
+            Boolean reasoningEnabledOverride
+    ) {
+        ModelStageConfig configured = chapterModelProperties.forStage(stage);
+        if (!Boolean.FALSE.equals(reasoningEnabledOverride)) {
+            return configured;
+        }
+        return new ModelStageConfig(
+                configured.model(),
+                configured.temperature(),
+                cn.ninth.novel.infrastructure.config.ReasoningLevel.OFF
+        );
+    }
+
+    private OpenAiChatOptions.Builder optionsForStage(ModelStageConfig config) {
+        return buildOptions(config);
+    }
+
     private String withEffectiveConfiguration(
             String message,
             ChapterModelConfigurationSummary configuration
@@ -1306,7 +1459,13 @@ public class ChapterModelPort implements IChapterModelPort {
     }
 
     private ChapterModelConfigurationSummary chapterConfiguration(String stage) {
-        ModelStageConfig config = chapterModelProperties.forStage(stage);
+        return chapterConfiguration(stage, chapterModelProperties.forStage(stage));
+    }
+
+    private ChapterModelConfigurationSummary chapterConfiguration(
+            String stage,
+            ModelStageConfig config
+    ) {
         String model = config.model() == null || config.model().isBlank()
                 ? modelMetadata.modelName()
                 : config.model().trim();

@@ -116,4 +116,26 @@ public interface IChapterModelPort {
         return callWithRawResponse(systemPrompt, userPrompt, responseType);
     }
 
+    /**
+     * 结构化产出并允许 REVIEW 实验按单次调用覆盖“是否启用思考”。
+     * {@code null} 表示沿用该 stage 的默认配置；false 只用于关闭思考，
+     * 不改变模型、温度、Prompt 或其他 stage 配置。
+     */
+    default <T> ChapterModelResponse<T> callWithRawResponse(
+            String systemPrompt,
+            String userPrompt,
+            Class<T> responseType,
+            String stage,
+            int attempt,
+            Boolean reasoningEnabledOverride
+    ) {
+        return callWithRawResponse(
+                systemPrompt,
+                userPrompt,
+                responseType,
+                stage,
+                attempt
+        );
+    }
+
 }

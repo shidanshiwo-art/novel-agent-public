@@ -2,6 +2,7 @@ package cn.ninth.novel.domain.chapter.adapter.repository;
 
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
 import cn.ninth.novel.domain.chapter.model.valobj.StoryStateSnapshot;
+import cn.ninth.novel.domain.memory.model.MemoryCommitRequest;
 
 /**
  * 章节生成结果持久化端口。
@@ -36,6 +37,21 @@ public interface IChapterPersistRepository {
             StoryStateSnapshot storyStateSnapshot
     ) {
         persist(projectCode, chapterNumber, content, chapterMemory);
+    }
+
+    /**
+     * 通过 P0.5 Canonical Gate 持久化章节。旧实现默认回退到原章节持久化，
+     * 生产 MySQL 仓储必须覆盖此方法以保证正文和 Canonical 共用一个事务。
+     */
+    default void persistWithMemoryCommit(
+            String projectCode,
+            int chapterNumber,
+            String content,
+            ChapterMemoryVO chapterMemory,
+            StoryStateSnapshot storyStateSnapshot,
+            MemoryCommitRequest memoryCommitRequest
+    ) {
+        persist(projectCode, chapterNumber, content, chapterMemory, storyStateSnapshot);
     }
 
     /**

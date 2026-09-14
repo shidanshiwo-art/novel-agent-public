@@ -119,14 +119,33 @@
             </main>
           </div>
 
-          <el-dialog v-model="bibleGeneratorOpen" :title="hasConfirmedBible ? '调整故事设定' : '生成故事设定'" width="620px" class="story-bible-generator-dialog" destroy-on-close>
+          <el-drawer
+            v-model="bibleGeneratorOpen"
+            :title="hasConfirmedBible ? '调整故事设定' : '生成故事设定'"
+            class="ai-generation-drawer"
+            direction="rtl"
+            :size="aiGeneratorDrawerSize"
+            :close-on-click-modal="false"
+            :close-on-press-escape="false"
+            :before-close="guardBibleGeneratorClose"
+            append-to-body
+            destroy-on-close
+          >
+            <template #header>
+              <div class="ai-generation-drawer-header">
+                <span>{{ hasConfirmedBible ? '调整故事设定' : '生成故事设定' }}</span>
+                <el-button text size="small" @click="toggleAiGeneratorDrawer">
+                  {{ aiGeneratorDrawerExpanded ? '恢复默认宽度' : '一键展开' }}
+                </el-button>
+              </div>
+            </template>
             <div class="bible-dialog-copy">
               <p>{{ hasConfirmedBible ? '告诉 AI 你希望调整什么：' : '你还可以补充一些要求：' }}</p>
                <el-input v-model="bibleRequirement" type="textarea" :autosize="{ minRows: 3 }" resize="none" maxlength="1000" show-word-limit :placeholder="hasConfirmedBible ? '只描述你希望改变的部分，未提及的设定会尽量保留' : '告诉 AI 你希望这版设定重点考虑什么'" />
               <p class="bible-dialog-example">{{ hasConfirmedBible ? '例如：保留钟楼和残页规则，弱化超自然表现，整体更偏现实悬疑。' : '例如：现代都市悬疑，不存在真正的鬼怪；故事整体偏压抑，但不要纯黑暗。' }}</p>
             </div>
-            <template #footer><el-button @click="bibleGeneratorOpen = false">取消</el-button><el-button type="primary" :loading="generatingBible" :disabled="loadingBible" @click="generateBible">生成</el-button></template>
-          </el-dialog>
+            <template #footer><el-button :disabled="generatingBible" @click="requestCloseBibleGenerator">取消</el-button><el-button type="primary" :loading="generatingBible" :disabled="loadingBible" @click="generateBible">生成</el-button></template>
+          </el-drawer>
         </div>
       </el-tab-pane>
 
@@ -223,7 +242,26 @@
           </el-drawer>
 
           <!-- AI 补充人物 -->
-          <el-dialog v-model="characterGeneratorOpen" title="AI 补充人物" width="860px" class="character-generator-dialog" :close-on-click-modal="false" destroy-on-close>
+          <el-drawer
+            v-model="characterGeneratorOpen"
+            title="AI 补充人物"
+            class="ai-generation-drawer"
+            direction="rtl"
+            :size="aiGeneratorDrawerSize"
+            :close-on-click-modal="false"
+            :close-on-press-escape="false"
+            :before-close="guardCharacterGeneratorClose"
+            append-to-body
+            destroy-on-close
+          >
+            <template #header>
+              <div class="ai-generation-drawer-header">
+                <span>AI 补充人物</span>
+                <el-button text size="small" @click="toggleAiGeneratorDrawer">
+                  {{ aiGeneratorDrawerExpanded ? '恢复默认宽度' : '一键展开' }}
+                </el-button>
+              </div>
+            </template>
             <div class="character-generator-copy">
               <p>告诉 AI 你希望补充哪些人物功能、性格或主线关联：</p>
               <el-form label-position="top" class="character-generator-form">
@@ -256,7 +294,7 @@
               </div>
             </section>
             <template #footer>
-              <el-button @click="characterGeneratorOpen = false">关闭</el-button>
+              <el-button :disabled="generatingCharacterDraft || discardingCharacterDraft || applyingCharacterDraft" @click="requestCloseCharacterGenerator">关闭</el-button>
               <el-button v-if="!characterDraftGenerated" type="primary" :loading="generatingCharacterDraft" @click="generateCharacterDrafts">补充人物</el-button>
               <template v-else>
                 <el-button plain :loading="generatingCharacterDraft" @click="generateCharacterDrafts">重新生成</el-button>
@@ -264,7 +302,7 @@
                 <el-button type="primary" :loading="applyingCharacterDraft" :disabled="!characterDrafts.length" @click="applyCharacterDrafts">应用到角色库</el-button>
               </template>
             </template>
-          </el-dialog>
+          </el-drawer>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -338,6 +376,7 @@ const characterKeyword = ref('')
 const characterCreatorOpen = ref(false)
 const editingCharacterCode = ref<string | null>(null)
 const characterGeneratorOpen = ref(false)
+const aiGeneratorDrawerExpanded = ref(false)
 const characterPreferredCount = ref(4)
 const characterRequirement = ref('')
 const generatingCharacterDraft = ref(false)
@@ -346,6 +385,7 @@ const discardingCharacterDraft = ref(false)
 const characterDraftId = ref<string | null>(null)
 const characterDrafts = ref<CharacterDraft[]>([])
 const characterDraftGenerated = ref(false)
+const aiGeneratorDrawerSize = computed(() => aiGeneratorDrawerExpanded.value ? 'max(80vw, 720px)' : '720px')
 const preparationItems = computed(() => [
   { label: '世界设定', completed: hasConfirmedBible.value },
   { label: '核心人物', completed: characters.value.length > 0 },
@@ -384,7 +424,28 @@ function openBibleGenerator() {
   if (hasConfirmedBible.value && !bibleDraftId.value && !confirmedBibleSnapshot.value) {
     confirmedBibleSnapshot.value = cloneBibleForm(bf)
   }
+  aiGeneratorDrawerExpanded.value = false
   bibleGeneratorOpen.value = true
+}
+
+function toggleAiGeneratorDrawer() {
+  aiGeneratorDrawerExpanded.value = !aiGeneratorDrawerExpanded.value
+}
+
+function guardBibleGeneratorClose(done: () => void) {
+  if (generatingBible.value) {
+    ElMessage.warning('AI 正在生成，请等待完成')
+    return
+  }
+  done()
+}
+
+function requestCloseBibleGenerator() {
+  if (generatingBible.value) {
+    ElMessage.warning('AI 正在生成，请等待完成')
+    return
+  }
+  bibleGeneratorOpen.value = false
 }
 
 function startBibleEditing() {
@@ -607,7 +668,24 @@ const roleOptions = [
 const savingChar = ref(false)
 const deletingChar = ref(false)
 function openCharacterGenerator() {
+  aiGeneratorDrawerExpanded.value = false
   characterGeneratorOpen.value = true
+}
+
+function guardCharacterGeneratorClose(done: () => void) {
+  if (generatingCharacterDraft.value || discardingCharacterDraft.value || applyingCharacterDraft.value) {
+    ElMessage.warning('人物草稿正在处理中，请等待完成')
+    return
+  }
+  done()
+}
+
+function requestCloseCharacterGenerator() {
+  if (generatingCharacterDraft.value || discardingCharacterDraft.value || applyingCharacterDraft.value) {
+    ElMessage.warning('人物草稿正在处理中，请等待完成')
+    return
+  }
+  characterGeneratorOpen.value = false
 }
 
 async function generateCharacterDrafts() {
@@ -885,8 +963,34 @@ function genderFormValue(value: string) { return ({ MALE: '男', FEMALE: '女', 
 .bible-dialog-copy :deep(.el-textarea__inner) { line-height: 1.8; }
 .bible-dialog-example { margin-top: 10px; color: var(--text-faint); font-size: 11px; line-height: 1.7; }
 .bible-dialog-copy { min-width: 0; }
-:global(.story-bible-generator-dialog) { width: min(620px, calc(100% - 24px)) !important; }
-:global(.story-bible-generator-dialog .el-dialog__body) { padding-top: 2px; }
+
+.ai-generation-drawer-header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-generation-drawer-header > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.ai-generation-drawer.el-drawer) {
+  min-width: min(680px, 100vw);
+  max-width: 100vw;
+}
+
+:global(.ai-generation-drawer .el-drawer__body) {
+  min-width: 0;
+  overflow-x: hidden;
+  padding: 20px clamp(18px, 3vw, 32px) 24px;
+}
 
 @media (max-width: 1080px) {
   .bible-content-layout { grid-template-columns: minmax(0, 1fr); gap: 8px; }
@@ -958,7 +1062,6 @@ function genderFormValue(value: string) { return ({ MALE: '男', FEMALE: '女', 
 .character-empty p { margin: 5px 0 16px; color: var(--text-faint); font-size: 11px; }
 .character-create-drawer { min-height: 100%; padding: 28px clamp(18px, 3vw, 34px) 34px; background: var(--bg); }
 :global(.character-drawer-modal .el-drawer) { width: min(640px, calc(100% - 16px)) !important; }
-:global(.character-generator-dialog.el-dialog) { width: min(860px, calc(100% - 30px)) !important; }
 .drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .drawer-head h1 { margin-top: 4px; font: 700 25px/1.35 "Songti SC", serif; }
 .drawer-head p { margin-top: 3px; color: var(--text-faint); font-size: 10px; }

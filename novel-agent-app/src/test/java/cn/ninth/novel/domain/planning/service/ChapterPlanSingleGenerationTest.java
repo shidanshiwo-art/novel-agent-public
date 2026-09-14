@@ -1,6 +1,9 @@
 package cn.ninth.novel.domain.planning.service;
 
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
+import cn.ninth.novel.domain.memory.model.MemoryContextCategory;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
 import cn.ninth.novel.domain.planning.adapter.port.IPlanningModelPort;
 import cn.ninth.novel.domain.planning.adapter.repository.IPlanningDraftRepository;
 import cn.ninth.novel.domain.planning.adapter.repository.IPlanningRepository;
@@ -132,6 +135,74 @@ class ChapterPlanSingleGenerationTest {
         assertThat(prompt)
                 .contains("【上一章】\n赵无极上一章负伤后退场")
                 .contains("【近期剧情记忆】\n无");
+    }
+
+    @Test
+    void shouldPreferPlanMemoryContextProviderForLongTermCandidates() {
+        RecordingModelPort model = new RecordingModelPort();
+        RecordingDraftRepository drafts = new RecordingDraftRepository();
+        RecordingPlanningRepository repository = new RecordingPlanningRepository();
+        repository.memoryContextItems = List.of(
+                MemoryContextItem.of(
+                        "open-loop-chapter-7",
+                        MemoryContextCategory.OPEN_LOOPS,
+                        "残晶来源仍未解决",
+                        7),
+                MemoryContextItem.of(
+                        "consolidated-chapter-7",
+                        MemoryContextCategory.CONSOLIDATED,
+                        "第7章确认残晶与北港旧案有关",
+                        7)
+        );
+        PlanningService service = new PlanningService(model, drafts, repository);
+
+        service.generateChapterPlan("novel-001", 17, "保留远期伏笔");
+        String prompt = model.userPrompts.get(0);
+
+        System.out.printf("PLAN MemoryContextProvider 长期召回：%s%n",
+                prompt.lines()
+                        .filter(line -> line.contains("残晶") || line.contains("PLAN 记忆"))
+                        .toList());
+        assertThat(prompt)
+                .contains("【PLAN 记忆上下文】", "第7章：残晶来源仍未解决",
+                        "第7章：第7章确认残晶与北港旧案有关")
+                .doesNotContain("【近期剧情记忆】");
+    }
+
+    @Test
+    void shouldUseCanonicalMemoryForExplicitV1PlanWithoutLegacyBridge() {
+        RecordingModelPort model = new RecordingModelPort();
+        RecordingDraftRepository drafts = new RecordingDraftRepository();
+        RecordingPlanningRepository repository = new RecordingPlanningRepository();
+        repository.canonicalMemoryContextItems = List.of(MemoryContextItem.canonical(
+                "CANONICAL_FACT",
+                "canonical-plan-state",
+                MemoryContextCategory.CONSOLIDATED,
+                "Canonical 计划状态",
+                16,
+                "chapter-v1",
+                "PROJECTION_ACTIVE",
+                null,
+                1));
+        repository.legacyMemoryContextItems = List.of(MemoryContextItem.bridge(
+                "legacy-plan-state",
+                MemoryContextCategory.CONSOLIDATED,
+                "Legacy 计划状态",
+                16));
+        PlanningService service = new PlanningService(model, drafts, repository);
+
+        service.generateChapterPlan("novel-001", 17, "需求", MemoryMode.V1);
+        String prompt = model.userPrompts.get(0);
+
+        System.out.printf(
+                "PLAN V1 route: canonicalReads=%d, legacyBridgeReads=%d%n",
+                repository.canonicalMemoryReads,
+                repository.legacyBridgeReads);
+        assertThat(prompt).contains("Canonical 计划状态")
+                .doesNotContain("Legacy 计划状态", "【近期剧情记忆】");
+        assertThat(repository.canonicalMemoryReads).isEqualTo(1);
+        assertThat(repository.legacyBridgeReads).isZero();
+        assertThat(repository.recentMemoryLimits).isEmpty();
     }
 
     @Test
@@ -292,6 +363,11 @@ class ChapterPlanSingleGenerationTest {
         );
         private final List<String> listOutlinesCalls = new ArrayList<>();
         private final List<Integer> recentMemoryLimits = new ArrayList<>();
+        private List<MemoryContextItem> memoryContextItems = List.of();
+        private List<MemoryContextItem> canonicalMemoryContextItems = List.of();
+        private List<MemoryContextItem> legacyMemoryContextItems = List.of();
+        private int canonicalMemoryReads;
+        private int legacyBridgeReads;
         private List<ChapterMemoryVO> recentMemories = List.of(
                 new ChapterMemoryVO(
                         16,
@@ -344,6 +420,32 @@ class ChapterPlanSingleGenerationTest {
         ) {
             recentMemoryLimits.add(limit);
             return recentMemories;
+        }
+
+        @Override
+        public List<MemoryContextItem> findMemoryContextItems(
+                String projectCode,
+                Integer chapterNumber
+        ) {
+            return memoryContextItems;
+        }
+
+        @Override
+        public List<MemoryContextItem> findCanonicalMemoryContextItems(
+                String projectCode,
+                Integer chapterNumber
+        ) {
+            canonicalMemoryReads++;
+            return canonicalMemoryContextItems;
+        }
+
+        @Override
+        public List<MemoryContextItem> findLegacyMemoryContextItems(
+                String projectCode,
+                Integer chapterNumber
+        ) {
+            legacyBridgeReads++;
+            return legacyMemoryContextItems;
         }
 
         @Override

@@ -5,6 +5,8 @@ export interface ApiResponse<T> {
   data: T
 }
 
+export type MemoryMode = 'LEGACY' | 'V1' | 'AUTO'
+
 // ——— 项目 ———
 export interface CreateNovelProjectRequest {
   projectCode: string

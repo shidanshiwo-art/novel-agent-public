@@ -101,6 +101,44 @@ class ChapterModelConfigurationTest {
     }
 
     @Test
+    void shouldDisableOnlyReviewReasoningWhenOverrideIsFalse() {
+        ChapterModelProperties properties = new ChapterModelProperties();
+        properties.setModel("deepseek-v4-flash");
+        properties.setTemperature(0.7);
+        properties.setReasoning(ReasoningLevel.LOW);
+        properties.getStageReasoning().put("REVIEW", ReasoningLevel.MEDIUM);
+
+        CapturingChatModel model = new CapturingChatModel();
+        ChapterModelPort port = new ChapterModelPort(
+                ChatClient.builder(model).build(),
+                properties
+        );
+
+        port.callWithRawResponse(
+                "system",
+                "user",
+                RootOutlineDraftVO.class,
+                "REVIEW",
+                1,
+                Boolean.FALSE
+        );
+        OpenAiChatOptions options = model.lastOptions.get();
+
+        assertThat(options.getModel()).isEqualTo("deepseek-v4-flash");
+        assertThat(options.getTemperature()).isEqualTo(0.7);
+        assertThat(options.getReasoningEffort()).isNull();
+        assertThat(options.getExtraBody())
+                .containsEntry("thinking", Map.of("type", "disabled"));
+        System.out.printf(
+                "REVIEW reasoning 覆盖通过：model=%s，temperature=%s，reasoning_effort=%s，thinking=%s%n",
+                options.getModel(),
+                options.getTemperature(),
+                options.getReasoningEffort(),
+                options.getExtraBody()
+        );
+    }
+
+    @Test
     void shouldLogEffectiveChapterConfigurationWithoutSensitiveOptions() {
         ChapterModelProperties properties = new ChapterModelProperties();
         properties.setProfile("CHAPTER");

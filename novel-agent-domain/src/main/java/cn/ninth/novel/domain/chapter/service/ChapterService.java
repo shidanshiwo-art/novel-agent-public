@@ -18,6 +18,13 @@ import cn.ninth.novel.domain.chapter.service.agent.CompressChapterNode;
 import cn.ninth.novel.domain.chapter.service.agent.PersistChapterNode;
 import cn.ninth.novel.domain.chapter.service.agent.ReviewChapterNode;
 import cn.ninth.novel.domain.chapter.service.agent.ReviseChapterNode;
+import cn.ninth.novel.domain.chapter.service.agent.ContinuityValidationNode;
+import cn.ninth.novel.domain.chapter.service.agent.FinalRegressionNode;
+import cn.ninth.novel.domain.chapter.service.agent.QualityReviewNode;
+import cn.ninth.novel.domain.chapter.service.agent.RepairPlanNode;
+import cn.ninth.novel.domain.chapter.service.agent.RegressionCheckNode;
+import cn.ninth.novel.domain.chapter.service.agent.ReviewPipelineRevisionNode;
+import cn.ninth.novel.domain.chapter.service.agent.ReviewPreparationNode;
 import cn.ninth.novel.domain.chapter.service.data.IDataService;
 import cn.ninth.novel.domain.chapter.service.session.ChapterGenerationEventType;
 import cn.ninth.novel.domain.chapter.service.session.ChapterGenerationSessionEvent;
@@ -25,6 +32,8 @@ import cn.ninth.novel.domain.chapter.service.session.ChapterGenerationSessionReg
 import cn.ninth.novel.domain.chapter.service.session.ChapterGenerationSessionSnapshot;
 import cn.ninth.novel.domain.chapter.service.workflow.ReviewRouter;
 import cn.ninth.novel.domain.chapter.service.workflow.HumanDecisionRouter;
+import cn.ninth.novel.domain.chapter.service.workflow.ReviewPipelineRouter;
+import cn.ninth.novel.domain.chapter.service.workflow.ChapterGenerationVariant;
 import cn.ninth.novel.types.enums.ResponseCode;
 import cn.ninth.novel.types.exception.AppException;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +53,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphState;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
 
 import java.util.HashMap;
 import java.util.List;
@@ -117,7 +127,15 @@ public class ChapterService implements  IChapterService {
                 new ChapterGenerationMetricsRecorder(),
                 humanDecisionRouter,
                 checkpointSaver,
-                stateSerializer
+                stateSerializer,
+                new ReviewPreparationNode(),
+                new ContinuityValidationNode(),
+                new QualityReviewNode(),
+                new RepairPlanNode(),
+                new ReviewPipelineRevisionNode(),
+                new RegressionCheckNode(),
+                new FinalRegressionNode(),
+                new ReviewPipelineRouter()
         );
     }
 
@@ -136,7 +154,15 @@ public class ChapterService implements  IChapterService {
             ChapterGenerationMetricsRecorder metricsRecorder,
             HumanDecisionRouter humanDecisionRouter,
             BaseCheckpointSaver checkpointSaver,
-            StateSerializer<ChapterGraphState> stateSerializer
+            StateSerializer<ChapterGraphState> stateSerializer,
+            ReviewPreparationNode reviewPreparationNode,
+            ContinuityValidationNode continuityValidationNode,
+            QualityReviewNode qualityReviewNode,
+            RepairPlanNode repairPlanNode,
+            ReviewPipelineRevisionNode reviewPipelineRevisionNode,
+            RegressionCheckNode regressionCheckNode,
+            FinalRegressionNode finalRegressionNode,
+            ReviewPipelineRouter reviewPipelineRouter
     ) {
         this.dataService = dataService;
         this.projectRepository = projectRepository;
@@ -153,6 +179,14 @@ public class ChapterService implements  IChapterService {
                 compressChapterNode,
                 persistChapterNode,
                 humanDecisionRouter,
+                reviewPreparationNode,
+                continuityValidationNode,
+                qualityReviewNode,
+                repairPlanNode,
+                reviewPipelineRevisionNode,
+                regressionCheckNode,
+                finalRegressionNode,
+                reviewPipelineRouter,
                 checkpointSaver,
                 stateSerializer
         );
@@ -160,17 +194,59 @@ public class ChapterService implements  IChapterService {
     @Override
     public ChapterGenerationResultVO generateChapter(String projectCode,
                                                      int chapterNumber) {
+        return generateChapter(projectCode, chapterNumber, MemoryMode.defaultMode());
+    }
+
+    @Override
+    public ChapterGenerationResultVO generateChapter(
+            String projectCode,
+            int chapterNumber,
+            MemoryMode memoryMode
+    ) {
+        return generateChapter(
+                projectCode, chapterNumber, memoryMode,
+                ChapterGenerationVariant.defaultVariant());
+    }
+
+    @Override
+    public ChapterGenerationResultVO generateChapter(
+            String projectCode,
+            int chapterNumber,
+            MemoryMode memoryMode,
+            ChapterGenerationVariant generationVariant
+    ) {
         String workflowId = UUID.randomUUID().toString();
-        return executeChapterWorkflow(workflowId, projectCode, chapterNumber);
+        return executeChapterWorkflow(
+                workflowId,
+                projectCode,
+                chapterNumber,
+                resolveMemoryMode(memoryMode),
+                resolveGenerationVariant(generationVariant));
     }
 
     @Override
     public String createGenerationSession(String projectCode, int chapterNumber) {
+        return createGenerationSession(
+                projectCode, chapterNumber, MemoryMode.defaultMode());
+    }
+
+    @Override
+    public String createGenerationSession(
+            String projectCode,
+            int chapterNumber,
+            MemoryMode memoryMode
+    ) {
         String workflowId = UUID.randomUUID().toString();
+        MemoryMode resolvedMemoryMode = resolveMemoryMode(memoryMode);
         sessionRegistry.register(workflowId, projectCode, chapterNumber);
         CompletableFuture.runAsync(() -> {
             try {
-                executeChapterWorkflow(workflowId, projectCode, chapterNumber);
+                executeChapterWorkflow(
+                        workflowId,
+                        projectCode,
+                        chapterNumber,
+                        resolvedMemoryMode,
+                        ChapterGenerationVariant.defaultVariant());
             } catch (RuntimeException exception) {
                 log.error(
                         "异步章节生成工作流执行失败，workflowId={}, projectCode={}, chapterNumber={}",
@@ -271,7 +347,9 @@ public class ChapterService implements  IChapterService {
     private ChapterGenerationResultVO executeChapterWorkflow(
             String workflowId,
             String projectCode,
-            int chapterNumber
+            int chapterNumber,
+            MemoryMode memoryMode,
+            ChapterGenerationVariant generationVariant
     ) {
         long workflowStartedAt = System.nanoTime();
         boolean keepCheckpointForHuman = false;
@@ -285,15 +363,18 @@ public class ChapterService implements  IChapterService {
                     .threadId(workflowId)
                     .build();
             log.info(
-                    "[CHAPTER] workflow={} started chapter={}",
+                    "[CHAPTER] workflow={} started chapter={} memoryMode={}",
                     workflowId,
-                    chapterNumber
+                    chapterNumber,
+                    memoryMode
             );
             NodeOutput<ChapterGraphState> output = chapterGraph.invokeFinal(
                     GraphInput.args(Map.of(
                             ChapterGraphKeys.PROJECT_CODE, projectCode,
                             ChapterGraphKeys.CHAPTER_NUMBER, chapterNumber,
-                            ChapterGraphKeys.WORKFLOW_ID, workflowId
+                            ChapterGraphKeys.WORKFLOW_ID, workflowId,
+                            ChapterGraphKeys.MEMORY_MODE, memoryMode,
+                            ChapterGraphKeys.GENERATION_VARIANT, generationVariant
                     )),
                     config
             ).orElseThrow(()->workflowException("章节生成工作流未返回最终状态"));
@@ -652,6 +733,14 @@ public class ChapterService implements  IChapterService {
             CompressChapterNode compressChapterNode,
             PersistChapterNode persistChapterNode,
             HumanDecisionRouter humanDecisionRouter,
+            ReviewPreparationNode reviewPreparationNode,
+            ContinuityValidationNode continuityValidationNode,
+            QualityReviewNode qualityReviewNode,
+            RepairPlanNode repairPlanNode,
+            ReviewPipelineRevisionNode reviewPipelineRevisionNode,
+            RegressionCheckNode regressionCheckNode,
+            FinalRegressionNode finalRegressionNode,
+            ReviewPipelineRouter reviewPipelineRouter,
             BaseCheckpointSaver checkpointSaver,
             StateSerializer<ChapterGraphState> stateSerializer
     ) {
@@ -667,6 +756,38 @@ public class ChapterService implements  IChapterService {
                     .addNode(
                             "DRAFT",
                             draftNodeWithEvents(draftChapterNode)
+                    )
+                    .addNode(
+                            ReviewPreparationNode.NODE,
+                            node_async(reviewPreparationNode::apply)
+                    )
+                    .addNode(
+                            ContinuityValidationNode.NODE,
+                            node_async(continuityValidationNode::apply)
+                    )
+                    .addNode(
+                            QualityReviewNode.NODE,
+                            node_async(qualityReviewNode::apply)
+                    )
+                    .addNode(
+                            RepairPlanNode.NODE,
+                            node_async(repairPlanNode::apply)
+                    )
+                    .addNode(
+                            ReviewPipelineRouter.REVISION_1,
+                            node_async(reviewPipelineRevisionNode::apply)
+                    )
+                    .addNode(
+                            ReviewPipelineRouter.REVISION_2,
+                            node_async(reviewPipelineRevisionNode::apply)
+                    )
+                    .addNode(
+                            RegressionCheckNode.NODE,
+                            node_async(regressionCheckNode::apply)
+                    )
+                    .addNode(
+                            FinalRegressionNode.NODE,
+                            node_async(finalRegressionNode::apply)
                     )
                     .addNode(
                             "REVIEW",
@@ -713,15 +834,73 @@ public class ChapterService implements  IChapterService {
                             "DRAFT",
                             command_async(this::routeAfterDraft),
                             Map.of(
-                                    "REVIEW", "REVIEW",
+                                    ReviewPreparationNode.NODE, ReviewPreparationNode.NODE,
                                     COMPRESSION, COMPRESSION
+                            )
+                    )
+                    .addEdge(
+                            ReviewPreparationNode.NODE,
+                            ContinuityValidationNode.NODE
+                    )
+                    .addEdge(
+                            ContinuityValidationNode.NODE,
+                            QualityReviewNode.NODE
+                    )
+                    .addEdge(
+                            QualityReviewNode.NODE,
+                            RepairPlanNode.NODE
+                    )
+                    .addConditionalEdges(
+                            RepairPlanNode.NODE,
+                            command_async(reviewPipelineRouter::afterRepairPlan),
+                            Map.of(
+                                    ReviewPipelineRouter.PASS, COMPRESSION,
+                                    ReviewPipelineRouter.REVISION_1,
+                                    ReviewPipelineRouter.REVISION_1,
+                                    ReviewPipelineRouter.REVISION_2,
+                                    ReviewPipelineRouter.REVISION_2,
+                                    ReviewPipelineRouter.FINAL_REGRESSION,
+                                    FinalRegressionNode.NODE,
+                                    ReviewPipelineRouter.HUMAN,
+                                    HUMAN
+                            )
+                    )
+                    .addEdge(
+                            ReviewPipelineRouter.REVISION_1,
+                            RegressionCheckNode.NODE
+                    )
+                    .addEdge(
+                            ReviewPipelineRouter.REVISION_2,
+                            FinalRegressionNode.NODE
+                    )
+                    .addConditionalEdges(
+                            RegressionCheckNode.NODE,
+                            command_async(reviewPipelineRouter::afterRegressionCheck),
+                            Map.of(
+                                    ReviewPipelineRouter.PASS, COMPRESSION,
+                                    ReviewPipelineRouter.REVISION_1,
+                                    ReviewPipelineRouter.REVISION_1,
+                                    ReviewPipelineRouter.REVISION_2,
+                                    ReviewPipelineRouter.REVISION_2,
+                                    ReviewPipelineRouter.FINAL_REGRESSION,
+                                    FinalRegressionNode.NODE,
+                                    ReviewPipelineRouter.HUMAN,
+                                    HUMAN
+                            )
+                    )
+                    .addConditionalEdges(
+                            FinalRegressionNode.NODE,
+                            command_async(reviewPipelineRouter::afterFinalRegression),
+                            Map.of(
+                                    ReviewPipelineRouter.PASS, COMPRESSION,
+                                    ReviewPipelineRouter.HUMAN, HUMAN
                             )
                     )
                     .addConditionalEdges(
                             "REVIEW",
                             command_async(
                                     (state, config) -> routeAfterReview(
-                                            state, config, reviewRouter
+                                            (ChapterGraphState) state, config, reviewRouter
                                     )
                             ),
                             Map.of(
@@ -864,7 +1043,7 @@ public class ChapterService implements  IChapterService {
         return new Command(
                 isAcceptRequested(config.threadId().orElse(null))
                         ? COMPRESSION
-                        : "REVIEW"
+                        : ReviewPreparationNode.NODE
         );
     }
 
@@ -1255,9 +1434,11 @@ public class ChapterService implements  IChapterService {
                 );
         ChapterContextAggregate context;
         try {
-            context = dataService.loadContext(
+            context = loadContext(
                     projectCode,
-                    chapterNumber
+                    chapterNumber,
+                    chapterGraphState.memoryMode(),
+                    chapterGraphState.workflowId().orElse(null)
             );
             context.validateReadyForGeneration();
         }catch (AppException exception){
@@ -1275,6 +1456,35 @@ public class ChapterService implements  IChapterService {
                 ChapterGraphKeys.COMPLETED_STAGES,
                 List.of("LOAD_CONTEXT")
         );
+    }
+
+    private ChapterContextAggregate loadContext(
+            String projectCode,
+            int chapterNumber,
+            MemoryMode memoryMode,
+            String generationId
+    ) {
+        MemoryMode resolvedMode = resolveMemoryMode(memoryMode);
+        // 新入口携带 generation/run；旧 IDataService 测试替身返回 null 时回退兼容入口。
+        ChapterContextAggregate context = dataService.loadContext(
+                projectCode, chapterNumber, resolvedMode, generationId);
+        if (context != null) {
+            return context;
+        }
+        return resolvedMode == MemoryMode.AUTO
+                ? dataService.loadContext(projectCode, chapterNumber)
+                : dataService.loadContext(projectCode, chapterNumber, resolvedMode);
+    }
+
+    private MemoryMode resolveMemoryMode(MemoryMode memoryMode) {
+        return memoryMode == null ? MemoryMode.defaultMode() : memoryMode;
+    }
+
+    private ChapterGenerationVariant resolveGenerationVariant(
+            ChapterGenerationVariant generationVariant
+    ) {
+        return generationVariant == null
+                ? ChapterGenerationVariant.defaultVariant() : generationVariant;
     }
 
     /**

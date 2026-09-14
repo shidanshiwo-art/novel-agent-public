@@ -1,6 +1,7 @@
 package cn.ninth.novel.infrastructure.adapter.repository;
 
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
 import cn.ninth.novel.domain.planning.adapter.repository.IPlanningRepository;
 import cn.ninth.novel.domain.planning.model.valobj.ChapterOutlineVO;
 import cn.ninth.novel.domain.planning.model.valobj.OutlineNodeVO;
@@ -43,6 +44,7 @@ public class PlanningRepository implements IPlanningRepository {
     private final IStoryBibleDao storyBibleDao;
     private final IStoryCharacterDao storyCharacterDao;
     private final IStorySummaryDao storySummaryDao;
+    private final CanonicalMemoryContextReader canonicalMemoryContextReader;
 
     /**
      * 保留给只关注大纲排序的旧测试夹具使用。
@@ -53,7 +55,19 @@ public class PlanningRepository implements IPlanningRepository {
             IChapterPlanDao chapterPlanDao
     ) {
         this(projectDao, outlineDao, chapterPlanDao,
-                null, null, null);
+                null, null, null, null);
+    }
+
+    public PlanningRepository(
+            INovelProjectDao projectDao,
+            IOutlineNodeDao outlineDao,
+            IChapterPlanDao chapterPlanDao,
+            IStoryBibleDao storyBibleDao,
+            IStoryCharacterDao storyCharacterDao,
+            IStorySummaryDao storySummaryDao
+    ) {
+        this(projectDao, outlineDao, chapterPlanDao, storyBibleDao,
+                storyCharacterDao, storySummaryDao, null);
     }
 
     @Autowired
@@ -63,7 +77,8 @@ public class PlanningRepository implements IPlanningRepository {
             IChapterPlanDao chapterPlanDao,
             IStoryBibleDao storyBibleDao,
             IStoryCharacterDao storyCharacterDao,
-            IStorySummaryDao storySummaryDao
+            IStorySummaryDao storySummaryDao,
+            CanonicalMemoryContextReader canonicalMemoryContextReader
     ) {
         this.projectDao = projectDao;
         this.outlineDao = outlineDao;
@@ -71,6 +86,7 @@ public class PlanningRepository implements IPlanningRepository {
         this.storyBibleDao = storyBibleDao;
         this.storyCharacterDao = storyCharacterDao;
         this.storySummaryDao = storySummaryDao;
+        this.canonicalMemoryContextReader = canonicalMemoryContextReader;
     }
 
     @Override
@@ -669,6 +685,34 @@ public class PlanningRepository implements IPlanningRepository {
         return storySummaryDao.queryRecent(project.getId(), chapterNumber, limit).stream()
                 .map(ChapterMemoryMapper::toMemory)
                 .toList();
+    }
+
+    @Override
+    public List<MemoryContextItem> findMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        if (chapterNumber == null || chapterNumber <= 1 || storySummaryDao == null) {
+            return List.of();
+        }
+        NovelProjectPO project = findProjectPO(projectCode);
+        if (project == null) {
+            return List.of();
+        }
+        return ChapterMemoryMapper.toMemoryContextItems(
+                storySummaryDao.queryAllValidByProjectId(project.getId()),
+                chapterNumber);
+    }
+
+    @Override
+    public List<MemoryContextItem> findCanonicalMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        if (canonicalMemoryContextReader == null) {
+            return List.of();
+        }
+        return canonicalMemoryContextReader.find(projectCode, chapterNumber);
     }
 
     @Override

@@ -2,16 +2,25 @@ package cn.ninth.novel.domain.chapter.service.workflow;
 
 import cn.ninth.novel.domain.chapter.model.aggregate.ChapterContextAggregate;
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
+import cn.ninth.novel.domain.chapter.model.valobj.ConflictCandidate;
+import cn.ninth.novel.domain.chapter.model.valobj.ContinuityFinding;
+import cn.ninth.novel.domain.chapter.model.valobj.QualityFinding;
+import cn.ninth.novel.domain.chapter.model.valobj.RepairPlan;
+import cn.ninth.novel.domain.chapter.model.valobj.RegressionCheckResult;
+import cn.ninth.novel.domain.chapter.model.valobj.ReviewContext;
 import cn.ninth.novel.domain.chapter.model.valobj.ReviewReportVO;
 import cn.ninth.novel.domain.chapter.model.valobj.PromptTraceRecord;
 import cn.ninth.novel.domain.chapter.model.valobj.StoryStateSnapshot;
+import cn.ninth.novel.domain.memory.model.MemoryCandidate;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
+import cn.ninth.novel.domain.memory.model.MemorySourceVersion;
 import org.bsc.langgraph4j.state.AgentState;
 import org.bsc.langgraph4j.state.AgentStateFactory;
 import org.bsc.langgraph4j.state.Channel;
 import org.bsc.langgraph4j.state.Channels;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -19,11 +28,24 @@ import java.util.Optional;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.CHAPTER_NUMBER;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.COMPLETED_STAGES;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.CONTEXT;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.CONFLICT_CANDIDATES;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.CONTINUITY_FINDINGS;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.CURRENT_NODE;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.DRAFT;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.MEMORY_CANDIDATES;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.MEMORY_MODE;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.FAILURE_MESSAGE;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.FINAL_DECISION;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.GENERATION_METRICS_DELTA;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.MEMORY;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.QUALITY_FINDINGS;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REGRESSION_RESULT;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REPAIR_PLAN;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REMAINING_REPAIR_PLAN;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REVIEW_CONTEXT;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REVIEW_SESSION_ID;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REVISION_ROUND;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REVISION_BEFORE_AFFECTED_TEXT;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.STORY_STATE_SNAPSHOT;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.HUMAN_DECISION;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.HUMAN_REVISE_ROUND;
@@ -34,6 +56,8 @@ import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.RE
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.REVISION_INSTRUCTION;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.WORKFLOW_STATUS;
 import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.WORKFLOW_ID;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.SOURCE_VERSION;
+import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.GENERATION_VARIANT;
 
 /**
  * 章节生成图的运行状态。
@@ -41,6 +65,9 @@ import static cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys.WO
  * 属于章节生成领域工作流，不应直接暴露到 HTTP 契约中。
  */
 public final class ChapterGraphState extends AgentState {
+
+    /** 新 Review Pipeline 允许的最大自动返修轮次。 */
+    public static final int MAX_REVISION_ROUND = 2;
 
     /** LangGraph4j 创建 State 实例时使用的工厂。 */
     public static final AgentStateFactory<ChapterGraphState> FACTORY = ChapterGraphState::new;
@@ -55,9 +82,24 @@ public final class ChapterGraphState extends AgentState {
             Map.entry(PROJECT_CODE, baseWithoutDefault()),
             Map.entry(CHAPTER_NUMBER, baseWithoutDefault()),
             Map.entry(WORKFLOW_ID, baseWithoutDefault()),
+            Map.entry(MEMORY_MODE, baseWithoutDefault()),
+            Map.entry(GENERATION_VARIANT, baseWithoutDefault()),
             Map.entry(CONTEXT, baseWithoutDefault()),
             Map.entry(DRAFT, baseWithoutDefault()),
+            Map.entry(SOURCE_VERSION, baseWithoutDefault()),
+            Map.entry(MEMORY_CANDIDATES, baseWithoutDefault()),
             Map.entry(REVIEW_REPORT, baseWithoutDefault()),
+            Map.entry(REVIEW_SESSION_ID, baseWithoutDefault()),
+            Map.entry(REVIEW_CONTEXT, baseWithoutDefault()),
+            Map.entry(CONFLICT_CANDIDATES, baseWithoutDefault()),
+            Map.entry(CONTINUITY_FINDINGS, baseWithoutDefault()),
+            Map.entry(QUALITY_FINDINGS, baseWithoutDefault()),
+            Map.entry(REPAIR_PLAN, baseWithoutDefault()),
+            Map.entry(REMAINING_REPAIR_PLAN, baseWithoutDefault()),
+            Map.entry(REVISION_ROUND, Channels.base(() -> 0)),
+            Map.entry(REVISION_BEFORE_AFFECTED_TEXT, baseWithoutDefault()),
+            Map.entry(REGRESSION_RESULT, baseWithoutDefault()),
+            Map.entry(FINAL_DECISION, Channels.base(() -> "")),
             Map.entry(MEMORY, baseWithoutDefault()),
             Map.entry(STORY_STATE_SNAPSHOT, baseWithoutDefault()),
             Map.entry(CURRENT_NODE, baseWithoutDefault()),
@@ -102,7 +144,7 @@ public final class ChapterGraphState extends AgentState {
     }
 
     public ChapterGraphState(Map<String, Object> initData) {
-        super(initData);
+        super(refreshCandidates(initData));
     }
 
     public Optional<String> projectCode() {
@@ -115,6 +157,28 @@ public final class ChapterGraphState extends AgentState {
 
     public Optional<String> workflowId() {
         return value(WORKFLOW_ID);
+    }
+
+    /** 未携带 mode 的历史 checkpoint 使用兼容 AUTO。 */
+    public MemoryMode memoryMode() {
+        Object raw = this.<Object>value(MEMORY_MODE).orElse(null);
+        if (raw instanceof MemoryMode mode) {
+            return mode;
+        }
+        return raw instanceof String text
+                ? MemoryMode.parse(text)
+                : MemoryMode.defaultMode();
+    }
+
+    /** 未携带实验变体的历史 checkpoint 使用当前生产实现。 */
+    public ChapterGenerationVariant generationVariant() {
+        Object raw = this.<Object>value(GENERATION_VARIANT).orElse(null);
+        if (raw instanceof ChapterGenerationVariant variant) {
+            return variant;
+        }
+        return raw instanceof String text
+                ? ChapterGenerationVariant.parse(text)
+                : ChapterGenerationVariant.defaultVariant();
     }
 
     public PromptTraceRecord promptTrace(
@@ -142,8 +206,79 @@ public final class ChapterGraphState extends AgentState {
         return value(DRAFT);
     }
 
+    public Optional<MemorySourceVersion> sourceVersion() {
+        return value(SOURCE_VERSION);
+    }
+
+    /**
+     * 返回 checkpoint/staging 中的候选；此列表不会被任何普通章节上下文格式化器读取。
+     */
+    public List<MemoryCandidate> memoryCandidates() {
+        return this.<List<MemoryCandidate>>value(MEMORY_CANDIDATES)
+                .map(List::copyOf)
+                .orElseGet(List::of);
+    }
+
     public Optional<ReviewReportVO> reviewReport() {
         return value(REVIEW_REPORT);
+    }
+
+    public Optional<String> reviewSessionId() {
+        return value(REVIEW_SESSION_ID);
+    }
+
+    public Optional<ReviewContext> reviewContext() {
+        return value(REVIEW_CONTEXT);
+    }
+
+    public List<ConflictCandidate> conflictCandidates() {
+        return this.<List<ConflictCandidate>>value(CONFLICT_CANDIDATES)
+                .map(List::copyOf)
+                .orElseGet(List::of);
+    }
+
+    public List<ContinuityFinding> continuityFindings() {
+        return this.<List<ContinuityFinding>>value(CONTINUITY_FINDINGS)
+                .map(List::copyOf)
+                .orElseGet(List::of);
+    }
+
+    public List<QualityFinding> qualityFindings() {
+        return this.<List<QualityFinding>>value(QUALITY_FINDINGS)
+                .map(List::copyOf)
+                .orElseGet(List::of);
+    }
+
+    public Optional<RepairPlan> repairPlan() {
+        return value(REPAIR_PLAN);
+    }
+
+    public Optional<RepairPlan> remainingRepairPlan() {
+        return value(REMAINING_REPAIR_PLAN);
+    }
+
+    public Map<String, String> revisionBeforeAffectedText() {
+        return this.<Map<String, String>>value(REVISION_BEFORE_AFFECTED_TEXT)
+                .map(Map::copyOf)
+                .orElseGet(Map::of);
+    }
+
+    public int revisionRound() {
+        int round = this.<Integer>value(REVISION_ROUND).orElse(0);
+        if (round < 0 || round > MAX_REVISION_ROUND) {
+            throw new IllegalStateException(
+                    "revisionRound 必须在 0 到 " + MAX_REVISION_ROUND + " 之间");
+        }
+        return round;
+    }
+
+    public Optional<RegressionCheckResult> regressionResult() {
+        return value(REGRESSION_RESULT);
+    }
+
+    public Optional<String> finalDecision() {
+        return this.<String>value(FINAL_DECISION)
+                .filter(value -> !value.isBlank());
     }
 
     public int reviseRound() {
@@ -192,5 +327,32 @@ public final class ChapterGraphState extends AgentState {
 
     public Optional<String> failureMessage() {
         return value(FAILURE_MESSAGE);
+    }
+
+    private static Map<String, Object> refreshCandidates(Map<String, Object> initData) {
+        if (initData == null || initData.isEmpty()) {
+            return initData;
+        }
+        Object sourceVersionValue = initData.get(SOURCE_VERSION);
+        Object candidatesValue = initData.get(MEMORY_CANDIDATES);
+        if (!(sourceVersionValue instanceof MemorySourceVersion sourceVersion)
+                || !(candidatesValue instanceof List<?> candidates)) {
+            return initData;
+        }
+        List<MemoryCandidate> typedCandidates = new ArrayList<>(candidates.size());
+        for (Object candidate : candidates) {
+            if (!(candidate instanceof MemoryCandidate memoryCandidate)) {
+                throw new IllegalArgumentException(
+                        "memoryCandidates 只能包含 MemoryCandidate");
+            }
+            typedCandidates.add(memoryCandidate);
+        }
+        String content = initData.get(DRAFT) instanceof String draft ? draft : null;
+        Map<String, Object> refreshed = new LinkedHashMap<>(initData);
+        refreshed.put(
+                MEMORY_CANDIDATES,
+                MemoryCandidate.revalidateAll(typedCandidates, sourceVersion, content)
+        );
+        return refreshed;
     }
 }

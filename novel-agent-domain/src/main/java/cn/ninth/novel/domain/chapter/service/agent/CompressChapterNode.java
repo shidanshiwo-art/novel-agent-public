@@ -14,6 +14,9 @@ import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphState;
 import cn.ninth.novel.types.enums.ResponseCode;
 import cn.ninth.novel.types.exception.AppException;
+import cn.ninth.novel.domain.memory.model.MemoryCandidate;
+import cn.ninth.novel.domain.memory.model.MemorySourceVersion;
+import cn.ninth.novel.domain.memory.service.FinalChapterCandidateExtractor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.action.NodeAction;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,12 +41,14 @@ public class CompressChapterNode implements NodeAction<ChapterGraphState> {
     private final IChapterModelPort chapterModelPort;
     private final ChapterModelRetryExecutor retryExecutor;
     private final PromptTraceRecorder promptTraceRecorder;
+    private final FinalChapterCandidateExtractor candidateExtractor;
 
     public CompressChapterNode(IChapterModelPort chapterModelPort) {
         this(
                 chapterModelPort,
                 new ChapterModelRetryExecutor(),
-                new PromptTraceRecorder()
+                new PromptTraceRecorder(),
+                new FinalChapterCandidateExtractor()
         );
     }
 
@@ -54,7 +59,8 @@ public class CompressChapterNode implements NodeAction<ChapterGraphState> {
         this(
                 chapterModelPort,
                 retryExecutor,
-                new PromptTraceRecorder()
+                new PromptTraceRecorder(),
+                new FinalChapterCandidateExtractor()
         );
     }
 
@@ -64,9 +70,24 @@ public class CompressChapterNode implements NodeAction<ChapterGraphState> {
             ChapterModelRetryExecutor retryExecutor,
             PromptTraceRecorder promptTraceRecorder
     ) {
+        this(
+                chapterModelPort,
+                retryExecutor,
+                promptTraceRecorder,
+                new FinalChapterCandidateExtractor()
+        );
+    }
+
+    public CompressChapterNode(
+            IChapterModelPort chapterModelPort,
+            ChapterModelRetryExecutor retryExecutor,
+            PromptTraceRecorder promptTraceRecorder,
+            FinalChapterCandidateExtractor candidateExtractor
+    ) {
         this.chapterModelPort = chapterModelPort;
         this.retryExecutor = retryExecutor;
         this.promptTraceRecorder = promptTraceRecorder;
+        this.candidateExtractor = candidateExtractor;
     }
 
     @Override
@@ -88,9 +109,20 @@ public class CompressChapterNode implements NodeAction<ChapterGraphState> {
                 state,
                 delta -> metrics.updateAndGet(current -> current.plus(delta))
         );
+        String finalContent = state.draft()
+                .orElseThrow(() -> compressionFailure("章节正文为空"));
+        MemorySourceVersion sourceVersion = state.sourceVersion()
+                .filter(version -> version.matchesContent(finalContent))
+                .orElseGet(() -> MemorySourceVersion.create(
+                        "compression:" + chapterNumber, finalContent));
+        String projectCode = state.projectCode().orElse("unknown-project");
+        List<MemoryCandidate> candidates = candidateExtractor.extract(
+                projectCode, chapterNumber, finalContent, sourceVersion);
         return Map.of(
                 ChapterGraphKeys.MEMORY, result.value().memory(),
                 ChapterGraphKeys.STORY_STATE_SNAPSHOT, result.value().storyStateSnapshot(),
+                ChapterGraphKeys.SOURCE_VERSION, sourceVersion,
+                ChapterGraphKeys.MEMORY_CANDIDATES, candidates,
                 ChapterGraphKeys.CURRENT_NODE, "COMPRESSION",
                 ChapterGraphKeys.COMPLETED_STAGES, List.of("COMPRESSION"),
                 ChapterGraphKeys.RETRY_COUNT, state.retryCount() + result.retryCount(),

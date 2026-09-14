@@ -2,6 +2,7 @@ package cn.ninth.novel.domain.planning.service;
 
 import cn.ninth.novel.domain.planning.model.valobj.*;
 import cn.ninth.novel.domain.planning.model.valobj.enums.OutlineNodeKindEnum;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
 
 public interface IPlanningService {
 
@@ -87,6 +88,16 @@ public interface IPlanningService {
             Integer chapterNumber,
             String requirement
     );
+
+    /** 使用与章节 DRAFT/REVIEW 相同的 Memory 路由模式生成章节计划。 */
+    default PlanningDraftVO generateChapterPlan(
+            String projectCode,
+            Integer chapterNumber,
+            String requirement,
+            MemoryMode memoryMode
+    ) {
+        return generateChapterPlan(projectCode, chapterNumber, requirement);
+    }
 
     void confirmChapterPlan(
             String projectCode,

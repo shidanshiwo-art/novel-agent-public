@@ -1,6 +1,7 @@
 package cn.ninth.novel.domain.planning.adapter.repository;
 
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
 import cn.ninth.novel.domain.planning.model.valobj.*;
 import cn.ninth.novel.domain.project.model.valobj.NovelProjectVO;
 import cn.ninth.novel.domain.project.model.valobj.StoryBibleVO;
@@ -46,6 +47,33 @@ public interface IPlanningRepository {
             int limit
     ) {
         return List.of();
+    }
+
+    /**
+     * 查询供 PLAN MemoryContextProvider 使用的长期候选。
+     * 返回空集合时，PlanningService 继续使用旧的近期记忆 fallback。
+     */
+    default List<MemoryContextItem> findMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        return List.of();
+    }
+
+    /** 查询已完成 backfill 的 canonical candidates；迁移未完成时允许为空。 */
+    default List<MemoryContextItem> findCanonicalMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        return List.of();
+    }
+
+    /** 明确读取旧 ChapterMemory/StoryStateSnapshot 产生的 legacy bridge。 */
+    default List<MemoryContextItem> findLegacyMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        return findMemoryContextItems(projectCode, chapterNumber);
     }
 
     OutlineNodeVO findOutline(String projectCode, String nodeCode);

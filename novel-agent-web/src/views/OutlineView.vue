@@ -204,15 +204,27 @@
       <el-empty v-else description="从左侧选择一个节点开始编辑" :image-size="96" />
     </main>
 
-    <el-dialog
+    <el-drawer
       v-model="rootGenerationVisible"
-      class="root-generation-dialog"
+      class="ai-generation-drawer"
       title="生成故事总纲"
-      width="680px"
+      direction="rtl"
+      :size="generationDrawerSize"
       :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :before-close="guardRootGenerationClose"
+      append-to-body
       destroy-on-close
       @closed="resetRootGeneration"
     >
+      <template #header>
+        <div class="ai-generation-drawer-header">
+          <span>生成故事总纲</span>
+          <el-button text size="small" @click="toggleGenerationDrawer">
+            {{ generationDrawerExpanded ? '恢复默认宽度' : '一键展开' }}
+          </el-button>
+        </div>
+      </template>
       <template v-if="rootGenerationStep === 'config'">
         <div class="root-generation-context">
           <h2>生成故事总纲</h2>
@@ -256,7 +268,7 @@
 
       <template #footer>
         <div v-if="rootGenerationStep === 'config'" class="root-generation-actions">
-          <el-button @click="rootGenerationVisible = false">取消</el-button>
+          <el-button :disabled="rootGenerating || rootConfirming" @click="requestCloseRootGeneration">取消</el-button>
           <el-button type="primary" :loading="rootGenerating" :disabled="!charactersReady" @click="generateRootDraft">生成</el-button>
         </div>
         <div v-else class="root-generation-actions">
@@ -264,7 +276,7 @@
           <el-button type="primary" :loading="rootConfirming" @click="confirmRootDraft">确认</el-button>
         </div>
       </template>
-    </el-dialog>
+    </el-drawer>
 
     <el-dialog
       v-if="!isMobile"
@@ -366,15 +378,27 @@
       </div>
     </el-drawer>
 
-    <el-dialog
+    <el-drawer
       v-model="nextGenerationVisible"
-      class="ai-next-dialog"
+      class="ai-generation-drawer"
       :title="nextGenerationActionLabel"
-      width="680px"
+      direction="rtl"
+      :size="generationDrawerSize"
       :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :before-close="guardNextGenerationClose"
+      append-to-body
       destroy-on-close
       @closed="resetNextGeneration"
     >
+      <template #header>
+        <div class="ai-generation-drawer-header">
+          <span>{{ nextGenerationActionLabel }}</span>
+          <el-button text size="small" @click="toggleGenerationDrawer">
+            {{ generationDrawerExpanded ? '恢复默认宽度' : '一键展开' }}
+          </el-button>
+        </div>
+      </template>
       <template v-if="nextGenerationStep === 'config'">
         <div class="ai-next-context">
           <h2>{{ nextGenerationActionLabel }}</h2>
@@ -430,7 +454,7 @@
 
       <template #footer>
         <div v-if="nextGenerationStep === 'config'" class="ai-next-actions">
-          <el-button @click="nextGenerationVisible = false">取消</el-button>
+          <el-button :disabled="nextGenerating || nextConfirming" @click="requestCloseNextGeneration">取消</el-button>
           <el-button type="primary" :loading="nextGenerating" @click="generateNextDraft">生成</el-button>
         </div>
         <div v-else class="ai-next-actions">
@@ -438,17 +462,29 @@
           <el-button type="primary" :loading="nextConfirming" @click="confirmNextDraft">确认写入</el-button>
         </div>
       </template>
-    </el-dialog>
+    </el-drawer>
 
-    <el-dialog
+    <el-drawer
       v-model="arcRegenerationVisible"
-      class="ai-regeneration-dialog"
+      class="ai-generation-drawer"
       title="AI 重新生成"
-      width="620px"
+      direction="rtl"
+      :size="generationDrawerSize"
       :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :before-close="guardArcRegenerationClose"
+      append-to-body
       destroy-on-close
       @closed="resetArcRegeneration"
     >
+      <template #header>
+        <div class="ai-generation-drawer-header">
+          <span>AI 重新生成</span>
+          <el-button text size="small" @click="toggleGenerationDrawer">
+            {{ generationDrawerExpanded ? '恢复默认宽度' : '一键展开' }}
+          </el-button>
+        </div>
+      </template>
       <template v-if="arcRegenerationStep === 'config'">
         <div class="ai-regeneration-context">
           <span class="eyebrow">章纲调整</span>
@@ -499,7 +535,7 @@
 
       <template #footer>
         <div v-if="arcRegenerationStep === 'config'" class="ai-regeneration-actions">
-          <el-button @click="arcRegenerationVisible = false">取消</el-button>
+          <el-button :disabled="arcRegenerationGenerating || arcRegenerationConfirming" @click="requestCloseArcRegeneration">取消</el-button>
           <el-button type="primary" :loading="arcRegenerationGenerating" @click="generateArcRegenerationDraft">
             生成
           </el-button>
@@ -511,7 +547,7 @@
           </el-button>
         </div>
       </template>
-    </el-dialog>
+    </el-drawer>
 
     <el-drawer v-model="drawerVisible" title="编辑节点" direction="rtl" size="min(92vw, 440px)">
       <template v-if="selectedNode">
@@ -674,6 +710,7 @@ const treeRef = ref<TreeInstance>()
 const selectedCode = ref('')
 const drawerVisible = ref(false)
 const isMobile = ref(false)
+const generationDrawerExpanded = ref(false)
 const savingNode = ref(false)
 const addChildVisible = ref(false)
 const addChildParent = ref<WorkbenchTreeNode | null>(null)
@@ -737,6 +774,10 @@ const editForm = reactive<EditForm>({
 })
 
 const selectedNode = computed(() => findNode(tree, selectedCode.value))
+const generationDrawerSize = computed(() => {
+  if (generationDrawerExpanded.value) return 'max(80vw, 720px)'
+  return isMobile.value ? '100vw' : '720px'
+})
 const hasBook = computed(() => tree.some((node) => node.nodeKind === 'BOOK'))
 const charactersReady = computed(() => characters.value.length > 0)
 const nodeCount = computed(() => countNodes(tree))
@@ -905,6 +946,7 @@ function openSelectedArcRegeneration() {
 function openArcRegeneration(node: WorkbenchTreeNode) {
   if (node.nodeKind !== 'ARC') return
   if (isMobile.value) drawerVisible.value = false
+  generationDrawerExpanded.value = false
   arcRegenerationNode.value = node
   arcRegenerationStep.value = 'config'
   arcRegenerationForm.requirement = ''
@@ -974,6 +1016,7 @@ function resetAddChildForm() {
 async function openNextGeneration(node: WorkbenchTreeNode) {
   if (!canCreateChild(node)) return
   if (isMobile.value) drawerVisible.value = false
+  generationDrawerExpanded.value = false
 
   if (node.nodeKind === 'BOOK') {
     const projectCode = projectStore.active?.projectCode
@@ -1193,6 +1236,7 @@ function resetArcRegeneration() {
   clearArcRegenerationDraft()
   arcRegenerationGenerating.value = false
   arcRegenerationConfirming.value = false
+  generationDrawerExpanded.value = false
 }
 
 function clearNextDraft() {
@@ -1216,14 +1260,68 @@ function resetNextGeneration() {
   clearNextDraft()
   nextGenerating.value = false
   nextConfirming.value = false
+  generationDrawerExpanded.value = false
 }
 
 function openRootGeneration() {
   if (!charactersReady.value) return
+  generationDrawerExpanded.value = false
   rootGenerationStep.value = 'config'
   rootGenerationForm.requirement = ''
   rootDraft.summary = ''
   rootGenerationVisible.value = true
+}
+
+function toggleGenerationDrawer() {
+  generationDrawerExpanded.value = !generationDrawerExpanded.value
+}
+
+function guardRootGenerationClose(done: () => void) {
+  if (rootGenerating.value || rootConfirming.value) {
+    ElMessage.warning('AI 正在处理中，请等待完成')
+    return
+  }
+  done()
+}
+
+function requestCloseRootGeneration() {
+  if (rootGenerating.value || rootConfirming.value) {
+    ElMessage.warning('AI 正在处理中，请等待完成')
+    return
+  }
+  rootGenerationVisible.value = false
+}
+
+function guardNextGenerationClose(done: () => void) {
+  if (nextGenerating.value || nextConfirming.value) {
+    ElMessage.warning('AI 正在处理中，请等待完成')
+    return
+  }
+  done()
+}
+
+function requestCloseNextGeneration() {
+  if (nextGenerating.value || nextConfirming.value) {
+    ElMessage.warning('AI 正在处理中，请等待完成')
+    return
+  }
+  nextGenerationVisible.value = false
+}
+
+function guardArcRegenerationClose(done: () => void) {
+  if (arcRegenerationGenerating.value || arcRegenerationConfirming.value) {
+    ElMessage.warning('AI 正在处理中，请等待完成')
+    return
+  }
+  done()
+}
+
+function requestCloseArcRegeneration() {
+  if (arcRegenerationGenerating.value || arcRegenerationConfirming.value) {
+    ElMessage.warning('AI 正在处理中，请等待完成')
+    return
+  }
+  arcRegenerationVisible.value = false
 }
 
 async function generateRootDraft() {
@@ -1291,6 +1389,7 @@ function resetRootGeneration() {
   rootDraft.summary = ''
   rootGenerating.value = false
   rootConfirming.value = false
+  generationDrawerExpanded.value = false
 }
 
 function normalizeOutlineNode(node: OutlineNode): WorkbenchTreeNode | null {
@@ -2157,20 +2256,32 @@ function toChineseNumber(value: number) {
   gap: 8px;
 }
 
-:global(.ai-next-dialog) {
-  max-width: calc(100vw - 24px);
-}
-
-:global(.ai-next-dialog .el-dialog__body) {
-  max-height: calc(100vh - 180px);
-  overflow-y: auto;
+.ai-generation-drawer-header {
   min-width: 0;
-  padding: 4px 24px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-:global(.ai-regeneration-dialog .el-dialog__body) {
-  max-height: calc(100vh - 180px);
-  overflow-y: auto;
+.ai-generation-drawer-header > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.ai-generation-drawer.el-drawer) {
+  min-width: min(680px, 100vw);
+  max-width: 100vw;
+}
+
+:global(.ai-generation-drawer .el-drawer__body) {
+  min-width: 0;
+  overflow-x: hidden;
+  padding: 20px clamp(18px, 3vw, 32px) 24px;
 }
 
 .root-generation-context {
@@ -2225,36 +2336,7 @@ function toChineseNumber(value: number) {
   display: none;
 }
 
-:global(.root-generation-dialog) {
-  max-width: calc(100vw - 24px);
-}
-
-:global(.root-generation-dialog .el-dialog__body) {
-  max-height: calc(100vh - 180px);
-  overflow-y: auto;
-  min-width: 0;
-  padding: 4px 24px 8px;
-}
-
 @media (max-width: 767px) {
-  :global(.ai-next-dialog) {
-    width: calc(100vw - 24px) !important;
-    margin-top: 4vh;
-  }
-
-  :global(.ai-next-dialog .el-dialog__body) {
-    padding-inline: 16px;
-  }
-
-  :global(.root-generation-dialog) {
-    width: calc(100vw - 24px) !important;
-    margin-top: 4vh;
-  }
-
-  :global(.root-generation-dialog .el-dialog__body) {
-    padding-inline: 16px;
-  }
-
   .drawer-context {
     flex-direction: column;
     gap: 18px;

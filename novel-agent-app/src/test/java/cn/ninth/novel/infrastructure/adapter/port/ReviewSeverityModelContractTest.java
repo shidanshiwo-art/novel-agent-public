@@ -156,6 +156,10 @@ class ReviewSeverityModelContractTest {
         assertThat(result.getReviewIssueVOList().get(0))
                 .extracting(ReviewIssueVO::getCategory, ReviewIssueVO::getDescription, ReviewIssueVO::getEvidence)
                 .containsExactly("世界规则", "违反设定", "死者复生。");
+        assertThat(result.getReviewIssueVOList().get(0))
+                .extracting(ReviewIssueVO::getIssueType, ReviewIssueVO::getCheckerType,
+                        ReviewIssueVO::getCurrentEvidence, ReviewIssueVO::getReason)
+                .containsExactly("WORLD_RULE", "SEMANTIC", "死者复生。", "违反设定");
         assertThat(result.hasBlock()).isTrue();
         assertThat(result.requiresRevision()).isTrue();
         String storedJson = new ObjectMapper().writeValueAsString(result);

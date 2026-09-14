@@ -15,6 +15,7 @@ import type {
   ReorderOutlineNodeRequest,
   UpdateChapterPlanRequest,
   UpdateOutlineNodeRequest,
+  MemoryMode,
 } from '../types'
 
 const base = (projectCode: string) => `/v1/novels/projects/${projectCode}`
@@ -119,9 +120,12 @@ export const generateChapterPlan = (
   projectCode: string,
   chapterNumber: number,
   data: GenerateChapterPlanRequest,
+  memoryMode?: MemoryMode,
 ) =>
   http.post<any, PlanningDraftResponse<ChapterPlan>>(
-    `${base(projectCode)}/chapter-plans/${chapterNumber}/generate`,
+    `${base(projectCode)}/chapter-plans/${chapterNumber}/generate${
+      memoryMode ? `?memoryMode=${encodeURIComponent(memoryMode)}` : ''
+    }`,
     data,
   )
 

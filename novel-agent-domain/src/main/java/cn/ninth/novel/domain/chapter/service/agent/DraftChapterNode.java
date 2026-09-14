@@ -14,6 +14,11 @@ import cn.ninth.novel.domain.chapter.model.valobj.PreviousChapterVO;
 import cn.ninth.novel.domain.chapter.model.valobj.PromptTraceRecord;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphState;
+import cn.ninth.novel.domain.chapter.service.workflow.ChapterGenerationVariant;
+import cn.ninth.novel.domain.memory.model.MemoryCandidate;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
+import cn.ninth.novel.domain.memory.model.MemoryContextPack;
+import cn.ninth.novel.domain.memory.model.MemorySourceVersion;
 import cn.ninth.novel.types.enums.ResponseCode;
 import cn.ninth.novel.types.exception.AppException;
 import lombok.extern.slf4j.Slf4j;
@@ -35,7 +40,6 @@ import java.util.function.Consumer;
 
 import static cn.ninth.novel.domain.chapter.service.agent.PromptAppender.appendLineIfPresent;
 import static cn.ninth.novel.domain.chapter.service.agent.PromptAppender.value;
-import static cn.ninth.novel.domain.chapter.service.agent.SystemPrompt.DRAFT_SYSTEM_PROMPT;
 
 /**
  * DRAFT 章节初稿节点。
@@ -122,8 +126,12 @@ public class DraftChapterNode implements NodeAction<ChapterGraphState> {
                 state,
                 delta -> metrics.updateAndGet(current -> current.plus(delta))
         );
+        MemorySourceVersion sourceVersion = MemorySourceVersion.create(result.value());
         return Map.of(
                 ChapterGraphKeys.DRAFT, result.value(),
+                ChapterGraphKeys.SOURCE_VERSION, sourceVersion,
+                ChapterGraphKeys.MEMORY_CANDIDATES, MemoryCandidate.revalidateAll(
+                        state.memoryCandidates(), sourceVersion, result.value()),
                 ChapterGraphKeys.CURRENT_NODE, "DRAFT",
                 ChapterGraphKeys.COMPLETED_STAGES, List.of("DRAFT"),
                 ChapterGraphKeys.RETRY_COUNT, state.retryCount() + result.retryCount(),
@@ -228,8 +236,10 @@ public class DraftChapterNode implements NodeAction<ChapterGraphState> {
         Consumer<Disposable> subscriptionHandler = activeSubscription == null
                 ? subscription -> { }
                 : activeSubscription;
-        String systemPrompt = DRAFT_SYSTEM_PROMPT;
-        String userPrompt = buildDraftUserPrompt(context);
+        ChapterGenerationVariant generationVariant = state == null
+                ? ChapterGenerationVariant.defaultVariant() : state.generationVariant();
+        String systemPrompt = SystemPrompt.draftSystemPrompt(generationVariant);
+        String userPrompt = buildDraftUserPrompt(context, generationVariant);
         logDraftContextSize(context, systemPrompt, userPrompt);
         ChapterModelRetryExecutor.RetryResult<String> result = retryExecutor.execute(
                 usedRetryCount,
@@ -423,11 +433,18 @@ public class DraftChapterNode implements NodeAction<ChapterGraphState> {
     }
 
     String buildDraftUserPrompt(ChapterContextAggregate context) {
+        return buildDraftUserPrompt(context, ChapterGenerationVariant.defaultVariant());
+    }
+
+    String buildDraftUserPrompt(
+            ChapterContextAggregate context,
+            ChapterGenerationVariant generationVariant
+    ) {
         StringBuilder prompt = new StringBuilder(16184);
         appendChapterPlan(prompt, context);
-        appendHistory(prompt, context);
+        appendHistory(prompt, context, generationVariant);
         appendCharacters(prompt, context);
-        appendStorySettings(prompt, context);
+        appendStorySettings(prompt, context, generationVariant);
         appendWritingStyle(prompt, context);
         appendWritingParameters(prompt, context);
 
@@ -457,11 +474,20 @@ public class DraftChapterNode implements NodeAction<ChapterGraphState> {
         prompt.append('\n');
     }
 
-    private void appendStorySettings(StringBuilder prompt, ChapterContextAggregate context) {
+    private void appendStorySettings(
+            StringBuilder prompt,
+            ChapterContextAggregate context,
+            ChapterGenerationVariant generationVariant
+    ) {
         StoryBibleEntity storyBible = context.getStoryBible();
 
         prompt.append("## 故事设定\n");
         ChapterPromptFormatter.appendHardRules(prompt, "不可违反的硬规则", storyBible.getHardRulesJson());
+        MemoryContextPack memoryContextPack = context.getMemoryContextPack();
+        if (memoryContextPack != null && !memoryContextPack.rules().isEmpty()) {
+            appendMemoryItems(
+                    prompt, "记忆召回的相关规则", memoryContextPack.rules(), generationVariant);
+        }
         ChapterPromptFormatter.appendPowerSystem(prompt, "力量体系", storyBible.getPowerSystemJson());
         appendLineIfPresent(prompt, "世界背景", storyBible.getWorldBackground());
         prompt.append('\n');
@@ -490,7 +516,11 @@ public class DraftChapterNode implements NodeAction<ChapterGraphState> {
         }
     }
 
-    private void appendHistory(StringBuilder prompt, ChapterContextAggregate context) {
+    private void appendHistory(
+            StringBuilder prompt,
+            ChapterContextAggregate context,
+            ChapterGenerationVariant generationVariant
+    ) {
         ChapterHistoryVO history = context.getHistory();
         Integer currentChapterNumber = context.getChapterPlan() == null
                 ? null
@@ -500,16 +530,64 @@ public class DraftChapterNode implements NodeAction<ChapterGraphState> {
                 history == null ? null : history.getPreviousChapter(),
                 currentChapterNumber
         );
-        appendEarlierMemories(prompt, history, currentChapterNumber);
-        appendStoryState(prompt, history);
+        appendMemoryHistory(
+                prompt, history, currentChapterNumber,
+                context.getMemoryContextPack(), generationVariant);
+        appendStoryState(prompt, history, context.getMemoryContextPack(), generationVariant);
     }
 
-    private void appendStoryState(StringBuilder prompt, ChapterHistoryVO history) {
+    private void appendStoryState(
+            StringBuilder prompt,
+            ChapterHistoryVO history,
+            MemoryContextPack memoryContextPack,
+            ChapterGenerationVariant generationVariant
+    ) {
         prompt.append("## 当前有效状态\n");
+        if (memoryContextPack != null && !memoryContextPack.currentStates().isEmpty()) {
+            appendMemoryItems(
+                    prompt, "记忆召回状态", memoryContextPack.currentStates(), generationVariant);
+            prompt.append('\n');
+            return;
+        }
         ChapterPromptFormatter.appendStoryStateSnapshot(
                 prompt,
                 history == null ? null : history.getStoryStateSnapshot()
         );
+    }
+
+    private void appendMemoryHistory(
+            StringBuilder prompt,
+            ChapterHistoryVO history,
+            Integer currentChapterNumber,
+            MemoryContextPack memoryContextPack,
+            ChapterGenerationVariant generationVariant
+    ) {
+        if (memoryContextPack == null || memoryContextPack.items().isEmpty()) {
+            appendEarlierMemories(prompt, history, currentChapterNumber);
+            return;
+        }
+
+        prompt.append("## 此前章节记忆\n");
+        appendMemoryItems(
+                prompt, "未解决剧情线程", memoryContextPack.openLoops(), generationVariant);
+        appendMemoryItems(
+                prompt, "长期压缩记忆", memoryContextPack.consolidated(), generationVariant);
+        appendMemoryItems(
+                prompt, "必要剧情桥接", memoryContextPack.episodes(), generationVariant);
+        prompt.append('\n');
+    }
+
+    private void appendMemoryItems(
+            StringBuilder prompt,
+            String label,
+            List<MemoryContextItem> items,
+            ChapterGenerationVariant generationVariant
+    ) {
+        if (generationVariant.knownVsNewDraftControlEnabled()) {
+            ChapterPromptFormatter.appendDraftMemoryItems(prompt, label, items);
+        } else {
+            ChapterPromptFormatter.appendMemoryItems(prompt, label, items);
+        }
     }
 
     private void appendPreviousChapter(

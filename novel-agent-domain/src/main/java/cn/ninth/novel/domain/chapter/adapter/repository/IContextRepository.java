@@ -7,6 +7,7 @@ import cn.ninth.novel.domain.chapter.model.entity.StoryBibleEntity;
 import cn.ninth.novel.domain.chapter.model.entity.StoryCharacterEntity;
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterHistoryVO;
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
 import cn.ninth.novel.domain.planning.model.valobj.OutlineNodeVO;
 
 import java.util.List;
@@ -83,5 +84,32 @@ public interface IContextRepository {
             int limit
     ) {
         return List.of();
+    }
+
+    /**
+     * 查询供统一 MemoryContextProvider 使用的长期候选。
+     * 旧的 ChapterHistoryVO/ChapterMemoryVO 查询仍保留，作为兼容 fallback。
+     */
+    default List<MemoryContextItem> findMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        return List.of();
+    }
+
+    /** 查询已完成 backfill 的 canonical candidates；迁移未完成时允许为空。 */
+    default List<MemoryContextItem> findCanonicalMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        return List.of();
+    }
+
+    /** 明确读取旧 ChapterMemory/StoryStateSnapshot 产生的 legacy bridge。 */
+    default List<MemoryContextItem> findLegacyMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        return findMemoryContextItems(projectCode, chapterNumber);
     }
 }

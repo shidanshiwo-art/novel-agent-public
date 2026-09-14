@@ -3,6 +3,9 @@ package cn.ninth.novel.trigger.http;
 import cn.ninth.novel.api.dto.*;
 import cn.ninth.novel.domain.planning.model.valobj.*;
 import cn.ninth.novel.domain.planning.service.IPlanningService;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
+import cn.ninth.novel.types.enums.ResponseCode;
+import cn.ninth.novel.types.exception.AppException;
 import cn.ninth.novel.types.response.Response;
 import org.springframework.web.bind.annotation.*;
 
@@ -239,6 +242,27 @@ public class NovelPlanningController {
         ));
     }
 
+    /** 实验运行参数入口；PLAN 使用的 mode 应与同一轮 DRAFT/REVIEW 一致。 */
+    @PostMapping(
+            value = "/chapter-plans/{chapterNumber}/generate",
+            params = "memoryMode"
+    )
+    public Response<PlanningDraftResponseDTO> generateChapterPlan(
+            @PathVariable String projectCode,
+            @PathVariable Integer chapterNumber,
+            @RequestBody GenerateChapterPlanRequestDTO request,
+            @RequestParam String memoryMode
+    ) {
+        return Response.success(toDraftResponse(
+                planningService.generateChapterPlan(
+                        projectCode,
+                        chapterNumber,
+                        request.requirement(),
+                        parseMemoryMode(memoryMode)
+                )
+        ));
+    }
+
     @PostMapping("/chapter-plans/{chapterNumber}/confirm")
     public Response<Void> confirmChapterPlan(
             @PathVariable String projectCode,
@@ -281,5 +305,14 @@ public class NovelPlanningController {
     ) {
         return value == null ? null
                 : cn.ninth.novel.domain.planning.model.valobj.enums.OutlineNodeKindEnum.valueOf(value);
+    }
+
+    private MemoryMode parseMemoryMode(String value) {
+        try {
+            return MemoryMode.parse(value);
+        } catch (IllegalArgumentException exception) {
+            throw AppException.user(
+                    ResponseCode.ILLEGAL_PARAMETER.getCode(), exception.getMessage());
+        }
     }
 }

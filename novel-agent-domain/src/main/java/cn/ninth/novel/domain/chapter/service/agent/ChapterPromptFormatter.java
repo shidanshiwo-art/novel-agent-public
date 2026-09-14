@@ -2,6 +2,8 @@ package cn.ninth.novel.domain.chapter.service.agent;
 
 import cn.ninth.novel.domain.chapter.model.entity.StoryCharacterEntity;
 import cn.ninth.novel.domain.chapter.model.valobj.StoryStateSnapshot;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
+import cn.ninth.novel.domain.memory.model.MemoryContextPack;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -14,7 +16,7 @@ import static cn.ninth.novel.domain.chapter.service.agent.PromptAppender.appendL
 /**
  * 将章节上下文中的存储字段渲染为模型可理解的业务文本。
  */
-final class ChapterPromptFormatter {
+public final class ChapterPromptFormatter {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -143,6 +145,109 @@ final class ChapterPromptFormatter {
         appendList(prompt, "已知与未知信息", snapshot.knowledge());
         appendList(prompt, "位置与出场状态", snapshot.presence());
         prompt.append('\n');
+    }
+
+    /**
+     * 将预算后的统一记忆上下文渲染为业务语义文本，不暴露 item ID 或内部类别枚举。
+     */
+    public static void appendMemoryContextPack(
+            StringBuilder prompt,
+            String title,
+            MemoryContextPack pack
+    ) {
+        prompt.append(title == null || title.isBlank() ? "记忆上下文" : title).append('\n');
+        if (pack == null || pack.items().isEmpty()) {
+            prompt.append("无\n\n");
+            return;
+        }
+        appendMemoryItems(prompt, "未解决剧情线程", pack.openLoops());
+        appendMemoryItems(prompt, "当前状态、知识与关系", pack.currentStates());
+        appendMemoryItems(prompt, "长期压缩记忆", pack.consolidated());
+        appendMemoryItems(prompt, "必要剧情桥接", pack.episodes());
+        appendMemoryItems(prompt, "相关规则", pack.rules());
+        prompt.append('\n');
+    }
+
+    /** 渲染单一记忆类别，供 DRAFT 保留旧的历史/状态段落结构。 */
+    public static void appendMemoryItems(
+            StringBuilder prompt,
+            String label,
+            List<MemoryContextItem> items
+    ) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        prompt.append(label).append("：\n");
+        for (MemoryContextItem item : items) {
+            if (item == null || item.content() == null || item.content().isBlank()) {
+                continue;
+            }
+            prompt.append("- ");
+            if (item.sourceChapter() > 0) {
+                prompt.append("第").append(item.sourceChapter()).append("章：");
+            }
+            prompt.append(item.content().trim()).append('\n');
+        }
+    }
+
+    /**
+     * 将 DRAFT 使用的记忆候选渲染为写作语义标签。
+     *
+     * <p>标签只属于 Prompt 表达层，不改变 MemoryContextItem 的类别或生命周期。</p>
+     */
+    static void appendDraftMemoryItems(
+            StringBuilder prompt,
+            String label,
+            List<MemoryContextItem> items
+    ) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        prompt.append(label).append("：\n");
+        for (MemoryContextItem item : items) {
+            if (item == null || item.content() == null || item.content().isBlank()) {
+                continue;
+            }
+            prompt.append("- [")
+                    .append(draftMemoryLabel(item))
+                    .append("] ");
+            if (item.sourceChapter() > 0) {
+                prompt.append("第").append(item.sourceChapter()).append("章：");
+            }
+            prompt.append(item.content().trim()).append('\n');
+        }
+    }
+
+    private static String draftMemoryLabel(MemoryContextItem item) {
+        return switch (item.category()) {
+            case CURRENT_STATES -> hasExplicitStateChange(item.content())
+                    ? "CHANGED_STATE" : "CURRENT_STATE";
+            case CONSOLIDATED -> "KNOWN_CONFIRMED";
+            case OPEN_LOOPS -> "OPEN_QUESTION";
+            case RULES -> "RULE";
+            case EPISODES -> hasExplicitStateChange(item.content())
+                    ? "CHANGED_STATE" : "BACKGROUND_ONLY";
+        };
+    }
+
+    private static boolean hasExplicitStateChange(String content) {
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        return content.contains("→")
+                || content.contains("->")
+                || content.contains("变为")
+                || content.contains("变成")
+                || content.contains("改为")
+                || content.contains("取代")
+                || content.contains("转移到")
+                || content.contains("恢复")
+                || content.contains("痊愈")
+                || content.contains("失去")
+                || content.contains("获得")
+                || content.contains("首次")
+                || content.contains("正式登场")
+                || content.contains("正式离场");
     }
 
     private static void appendList(StringBuilder prompt, String label, List<String> values) {

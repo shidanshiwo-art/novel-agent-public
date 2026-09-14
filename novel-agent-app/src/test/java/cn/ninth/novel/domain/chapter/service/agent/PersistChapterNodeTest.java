@@ -5,6 +5,11 @@ import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
 import cn.ninth.novel.domain.chapter.model.valobj.StoryStateSnapshot;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphState;
+import cn.ninth.novel.domain.memory.model.MemoryCandidate;
+import cn.ninth.novel.domain.memory.model.MemoryCandidateStatus;
+import cn.ninth.novel.domain.memory.model.MemoryCandidateType;
+import cn.ninth.novel.domain.memory.model.MemoryCommitRequest;
+import cn.ninth.novel.domain.memory.model.MemorySourceVersion;
 import cn.ninth.novel.types.enums.ResponseCode;
 import cn.ninth.novel.types.exception.AppException;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -131,6 +136,55 @@ class PersistChapterNodeTest {
 
         assertThat(captured).hasValue(snapshot);
         System.out.println("PERSIST 独立状态快照传递：" + captured.get());
+    }
+
+    @Test
+    void shouldPassFinalVersionAndCandidatesThroughCanonicalGateEntry() {
+        String content = "最终正文中的证据";
+        MemorySourceVersion sourceVersion = MemorySourceVersion.create("chapter-v1", content);
+        MemoryCandidate candidate = MemoryCandidate.provisional(
+                        sourceVersion, content, 0, 4, MemoryCandidateType.EVENT)
+                .withStatus(MemoryCandidateStatus.READY_FOR_GATE);
+        AtomicReference<MemoryCommitRequest> captured = new AtomicReference<>();
+        IChapterPersistRepository repository = new IChapterPersistRepository() {
+            @Override
+            public void persist(
+                    String projectCode,
+                    int chapterNumber,
+                    String content,
+                    ChapterMemoryVO chapterMemory
+            ) {
+                throw new AssertionError("应调用 Canonical Gate 持久化入口");
+            }
+
+            @Override
+            public void persistWithMemoryCommit(
+                    String projectCode,
+                    int chapterNumber,
+                    String content,
+                    ChapterMemoryVO chapterMemory,
+                    StoryStateSnapshot storyStateSnapshot,
+                    MemoryCommitRequest memoryCommitRequest
+            ) {
+                captured.set(memoryCommitRequest);
+            }
+        };
+
+        new PersistChapterNode(repository).apply(new ChapterGraphState(Map.of(
+                ChapterGraphKeys.PROJECT_CODE, "persist-gate-story",
+                ChapterGraphKeys.CHAPTER_NUMBER, 2,
+                ChapterGraphKeys.DRAFT, content,
+                ChapterGraphKeys.SOURCE_VERSION, sourceVersion,
+                ChapterGraphKeys.MEMORY_CANDIDATES, List.of(candidate),
+                ChapterGraphKeys.MEMORY, chapterMemory()
+        )));
+
+        System.out.printf("PERSIST Canonical Gate 输入：version=%s, candidates=%d%n",
+                captured.get().finalSourceVersion().chapterVersion(),
+                captured.get().candidates().size());
+        assertThat(captured.get().finalContent()).isEqualTo(content);
+        assertThat(captured.get().finalSourceVersion()).isEqualTo(sourceVersion);
+        assertThat(captured.get().candidates()).containsExactly(candidate);
     }
 
     private ChapterMemoryVO chapterMemory() {

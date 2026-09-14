@@ -12,9 +12,13 @@ class GenerateViewChapterPlanContractTest {
 
     private static final Path PROJECT_ROOT = Path.of("..").toAbsolutePath().normalize();
 
+    private static String readSource(Path path) throws IOException {
+        return Files.readString(path).replace("\r\n", "\n").replace('\r', '\n');
+    }
+
     @Test
     void shouldLoadGenerateAndConfirmCurrentChapterPlanWithSingleChapterControls() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -138,7 +142,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldResolveCurrentChapterArcOnlyThroughVolumeParent() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
         int chapterArcsStart = view.indexOf("const chapterArcs = computed(() =>");
@@ -155,7 +159,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldMoveToNextChapterPlanWithoutStartingGeneration() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
         int nextStart = view.indexOf("async function generateNextChapter()");
@@ -191,7 +195,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldNavigateOnlyBetweenExistingArcsAndBlockSwitchingDuringWorkflow() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
         int navigationStart = view.indexOf("function chapterNumberForArc(");
@@ -235,7 +239,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldRenderGenerateChapterDirectoryAndCurrentPlanDrawer() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -280,7 +284,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldKeepTheWholeGenerateWorkspaceHiddenUntilInitialPlanIsReady() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
         int pageStart = view.indexOf("<div class=\"generation-page workbench-shell\">");
@@ -334,7 +338,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldKeepGeneratePageChapterPlanInsideDrawerOnly() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -377,7 +381,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldGateSingleChapterGenerationByChapterPlanStatus() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -400,7 +404,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldResolveChapterOnlyAfterExistingPlansAreLoaded() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -452,7 +456,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldUseTheSimplifiedDefaultChapterPriority() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -486,7 +490,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldKeepExplicitUrlChapterBeforeLatestPlanFallback() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -519,7 +523,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldLoadInitialPlanOnlyAfterChapterNumberIsResolved() throws IOException {
-        String view = Files.readString(
+        String view = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/views/GenerateView.vue")
         );
 
@@ -572,7 +576,7 @@ class GenerateViewChapterPlanContractTest {
 
     @Test
     void shouldKeepChapterPlanRequirementOptionalInTheFrontendContract() throws IOException {
-        String types = Files.readString(
+        String types = readSource(
                 PROJECT_ROOT.resolve("novel-agent-web/src/types/index.ts")
         );
 

@@ -16,6 +16,8 @@ import cn.ninth.novel.domain.chapter.model.valobj.ReviewReportVO;
 import cn.ninth.novel.domain.chapter.model.valobj.GenerationMetricsDelta;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphKeys;
 import cn.ninth.novel.domain.chapter.service.workflow.ChapterGraphState;
+import cn.ninth.novel.domain.memory.model.MemoryCandidate;
+import cn.ninth.novel.domain.memory.model.MemorySourceVersion;
 import cn.ninth.novel.types.enums.ResponseCode;
 import cn.ninth.novel.types.exception.AppException;
 import lombok.extern.slf4j.Slf4j;
@@ -109,7 +111,13 @@ public class ReviseChapterNode implements NodeAction<ChapterGraphState> {
                 delta -> metrics.updateAndGet(current -> current.plus(delta))
         );
         Map<String, Object> update = new HashMap<>();
+        MemorySourceVersion sourceVersion = MemorySourceVersion.create(result.value());
         update.put(ChapterGraphKeys.DRAFT, result.value());
+        update.put(ChapterGraphKeys.SOURCE_VERSION, sourceVersion);
+        update.put(
+                ChapterGraphKeys.MEMORY_CANDIDATES,
+                MemoryCandidate.revalidateAll(
+                        state.memoryCandidates(), sourceVersion, result.value()));
         update.put(ChapterGraphKeys.CURRENT_NODE, "REVISE");
         update.put(ChapterGraphKeys.COMPLETED_STAGES, List.of("REVISE"));
         update.put(ChapterGraphKeys.RETRY_COUNT, state.retryCount() + result.retryCount());

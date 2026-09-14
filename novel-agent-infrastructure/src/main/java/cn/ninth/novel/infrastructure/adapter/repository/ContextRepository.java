@@ -9,6 +9,7 @@ import cn.ninth.novel.domain.chapter.model.valobj.ChapterHistoryVO;
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
 import cn.ninth.novel.domain.chapter.model.valobj.PreviousChapterVO;
 import cn.ninth.novel.domain.chapter.model.valobj.StoryStateSnapshot;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
 import cn.ninth.novel.domain.planning.model.valobj.OutlineNodeVO;
 import cn.ninth.novel.domain.planning.model.valobj.enums.OutlineNodeKindEnum;
 import cn.ninth.novel.infrastructure.dao.*;
@@ -53,6 +54,8 @@ public class ContextRepository implements IContextRepository {
     private final IStoryCharacterDao storyCharacterDao;
     /** 章节摘要 DAO，用于读取当前章节之前的近期记忆。 */
     private final IStorySummaryDao storySummaryDao;
+    /** Canonical Memory 只读适配器，负责 accepted source 和生命周期过滤。 */
+    private final CanonicalMemoryContextReader canonicalMemoryContextReader;
 
     /**
      * 创建结构化上下文仓储。
@@ -73,6 +76,27 @@ public class ContextRepository implements IContextRepository {
             IStoryChapterDao storyChapterDao,
             IStoryCharacterDao storyCharacterDao,
             IStorySummaryDao storySummaryDao) {
+        this(
+                novelProjectDao,
+                storyBibleDao,
+                chapterPlanDao,
+                outlineNodeDao,
+                storyChapterDao,
+                storyCharacterDao,
+                storySummaryDao,
+                null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ContextRepository(
+            INovelProjectDao novelProjectDao,
+            IStoryBibleDao storyBibleDao,
+            IChapterPlanDao chapterPlanDao,
+            IOutlineNodeDao outlineNodeDao,
+            IStoryChapterDao storyChapterDao,
+            IStoryCharacterDao storyCharacterDao,
+            IStorySummaryDao storySummaryDao,
+            CanonicalMemoryContextReader canonicalMemoryContextReader) {
         this.novelProjectDao = novelProjectDao;
         this.storyBibleDao = storyBibleDao;
         this.chapterPlanDao = chapterPlanDao;
@@ -80,6 +104,7 @@ public class ContextRepository implements IContextRepository {
         this.storyChapterDao = storyChapterDao;
         this.storyCharacterDao = storyCharacterDao;
         this.storySummaryDao = storySummaryDao;
+        this.canonicalMemoryContextReader = canonicalMemoryContextReader;
     }
 
     /**
@@ -311,6 +336,34 @@ public class ContextRepository implements IContextRepository {
         return storySummaryDao.queryRecent(project.getId(), chapterNumber, limit).stream()
                 .map(ChapterMemoryMapper::toMemory)
                 .toList();
+    }
+
+    @Override
+    public List<MemoryContextItem> findMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        if (chapterNumber == null || chapterNumber <= 1 || storySummaryDao == null) {
+            return List.of();
+        }
+        NovelProjectPO project = findProject(projectCode);
+        if (project == null) {
+            return List.of();
+        }
+        return ChapterMemoryMapper.toMemoryContextItems(
+                storySummaryDao.queryAllValidByProjectId(project.getId()),
+                chapterNumber);
+    }
+
+    @Override
+    public List<MemoryContextItem> findCanonicalMemoryContextItems(
+            String projectCode,
+            Integer chapterNumber
+    ) {
+        if (canonicalMemoryContextReader == null) {
+            return List.of();
+        }
+        return canonicalMemoryContextReader.find(projectCode, chapterNumber);
     }
 
     /**

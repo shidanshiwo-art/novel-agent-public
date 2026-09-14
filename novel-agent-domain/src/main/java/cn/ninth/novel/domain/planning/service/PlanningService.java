@@ -3,6 +3,17 @@ package cn.ninth.novel.domain.planning.service;
 import cn.ninth.novel.domain.common.validation.StructuredModelOutputValidator;
 
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
+import cn.ninth.novel.domain.chapter.service.agent.ChapterPromptFormatter;
+import cn.ninth.novel.domain.memory.model.MemoryBudgetSpec;
+import cn.ninth.novel.domain.memory.model.MemoryContextCategory;
+import cn.ninth.novel.domain.memory.model.MemoryContextItem;
+import cn.ninth.novel.domain.memory.model.MemoryContextPack;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
+import cn.ninth.novel.domain.memory.model.MemoryProfile;
+import cn.ninth.novel.domain.memory.model.MemoryQuerySpec;
+import cn.ninth.novel.domain.memory.service.LegacyFallbackMetricsCollector;
+import cn.ninth.novel.domain.memory.service.LegacyFallbackRouter;
+import cn.ninth.novel.domain.memory.service.MemoryContextProviderMetricsRecorder;
 import cn.ninth.novel.domain.planning.adapter.port.IPlanningModelPort;
 import cn.ninth.novel.domain.planning.adapter.repository.IPlanningDraftRepository;
 import cn.ninth.novel.domain.planning.adapter.repository.IPlanningRepository;
@@ -25,6 +36,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class PlanningService implements IPlanningService {
@@ -35,6 +47,7 @@ public class PlanningService implements IPlanningService {
     private final IPlanningModelPort modelPort;
     private final IPlanningDraftRepository draftRepository;
     private final IPlanningRepository planningRepository;
+    private final LegacyFallbackRouter legacyFallbackRouter;
     private final RelevantCharacterSelector relevantCharacterSelector =
             new RelevantCharacterSelector();
 
@@ -43,9 +56,22 @@ public class PlanningService implements IPlanningService {
             IPlanningDraftRepository draftRepository,
             IPlanningRepository planningRepository
     ) {
+        this(modelPort, draftRepository, planningRepository,
+                new MemoryContextProviderMetricsRecorder());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public PlanningService(
+            IPlanningModelPort modelPort,
+            IPlanningDraftRepository draftRepository,
+            IPlanningRepository planningRepository,
+            MemoryContextProviderMetricsRecorder metricsRecorder
+    ) {
         this.modelPort = modelPort;
         this.draftRepository = draftRepository;
         this.planningRepository = planningRepository;
+        this.legacyFallbackRouter = new LegacyFallbackRouter(
+                metricsRecorder, new LegacyFallbackMetricsCollector());
     }
 
     @Override
@@ -186,6 +212,7 @@ public class PlanningService implements IPlanningService {
     public PlanningDraftVO generateRootOutline(String projectCode, String requirement) {
         requireText(projectCode, "projectCode");
         String normalizedRequirement = requirement == null ? "" : requirement.trim();
+        String generationId = UUID.randomUUID().toString();
         NovelProjectVO project = requireProject(projectCode);
         if (project.targetChapterCount() == null || project.targetChapterCount() <= 0) {
             throw illegalParameter("项目 targetChapterCount 必须大于 0");
@@ -998,7 +1025,21 @@ public class PlanningService implements IPlanningService {
             Integer chapterNumber,
             String requirement
     ) {
+        return generateChapterPlan(
+                projectCode, chapterNumber, requirement, MemoryMode.defaultMode());
+    }
+
+    @Override
+    public PlanningDraftVO generateChapterPlan(
+            String projectCode,
+            Integer chapterNumber,
+            String requirement,
+            MemoryMode memoryMode
+    ) {
         requireText(projectCode, "projectCode");
+        MemoryMode resolvedMemoryMode = memoryMode == null
+                ? MemoryMode.defaultMode() : memoryMode;
+        String generationId = UUID.randomUUID().toString();
         if (chapterNumber == null || chapterNumber <= 0) {
             throw illegalParameter("chapterNumber 必须大于 0");
         }
@@ -1022,19 +1063,27 @@ public class PlanningService implements IPlanningService {
 
         StoryBibleVO bible = planningRepository.findBible(projectCode);
         List<String> hardRules = parseHardRules(bible == null ? null : bible.hardRulesJson());
-        String previousChapterSummary = planningRepository.findPreviousChapterSummary(
-                projectCode, chapterNumber
+        MemoryContextPack memoryContextPack = buildPlanMemoryContext(
+                projectCode,
+                chapterNumber,
+                outlineContext.target(),
+                hardRules,
+                resolvedMemoryMode,
+                generationId
         );
-        List<ChapterMemoryBriefVO> recentMemories = planningRepository
-                .findRecentChapterMemories(
-                        projectCode,
-                        chapterNumber,
-                        ChapterPlanContextVO.MAX_RECENT_MEMORIES
-                )
-                .stream()
-                .filter(Objects::nonNull)
-                .map(this::toMemoryBrief)
-                .toList();
+        String previousChapterSummary = resolvedMemoryMode == MemoryMode.V1
+                ? previousChapterSummary(memoryContextPack, chapterNumber)
+                : planningRepository.findPreviousChapterSummary(projectCode, chapterNumber);
+        List<ChapterMemoryBriefVO> recentMemories = resolvedMemoryMode == MemoryMode.V1
+                ? List.of()
+                : planningRepository.findRecentChapterMemories(
+                                projectCode,
+                                chapterNumber,
+                                ChapterPlanContextVO.MAX_RECENT_MEMORIES
+                        ).stream()
+                        .filter(Objects::nonNull)
+                        .map(this::toMemoryBrief)
+                        .toList();
         List<CharacterBriefVO> relevantCharacters = relevantCharacterSelector.select(
                 previousChapterSummary,
                 outlineContext.target().title(),
@@ -1063,7 +1112,7 @@ public class PlanningService implements IPlanningService {
 
         ChapterPlanDraftVO generated = modelPort.call(
                 PlanningPrompts.CHAPTER_PLAN_SYSTEM,
-                buildChapterPlanPrompt(context),
+                buildChapterPlanPrompt(context, memoryContextPack),
                 ChapterPlanDraftVO.class,
                 "CHAPTER_PLAN",
                 1
@@ -1157,6 +1206,13 @@ public class PlanningService implements IPlanningService {
     }
 
     private String buildChapterPlanPrompt(ChapterPlanContextVO context) {
+        return buildChapterPlanPrompt(context, null);
+    }
+
+    private String buildChapterPlanPrompt(
+            ChapterPlanContextVO context,
+            MemoryContextPack memoryContextPack
+    ) {
         StringBuilder prompt = new StringBuilder(8192);
         prompt.append("【当前章节】\n")
                 .append("第 ").append(context.chapterNumber()).append(" 章\n\n");
@@ -1180,7 +1236,7 @@ public class PlanningService implements IPlanningService {
                 .append("当前剧情段第 ").append(context.position().position())
                 .append('/').append(context.position().total()).append(" 章\n\n");
 
-        appendPreviousChapterSummary(prompt, context);
+        appendPreviousChapterSummary(prompt, context, memoryContextPack);
 
         prompt.append("【相关人物】\n");
         if (context.relevantCharacters().isEmpty()) {
@@ -1194,8 +1250,13 @@ public class PlanningService implements IPlanningService {
             }
         }
 
-        appendRecentMemories(prompt, context.recentMemories());
-        appendListSection(prompt, "【硬规则】", context.hardRules());
+        if (memoryContextPack == null || memoryContextPack.items().isEmpty()) {
+            appendRecentMemories(prompt, context.recentMemories());
+            appendListSection(prompt, "【硬规则】", context.hardRules());
+        } else {
+            ChapterPromptFormatter.appendMemoryContextPack(
+                    prompt, "【PLAN 记忆上下文】", memoryContextPack);
+        }
         prompt.append("【补充要求】\n");
         if (context.requirement() == null || context.requirement().isBlank()) {
             prompt.append("无（按当前 Story Bible、当前大纲和前文自然生成下一章计划）\n");
@@ -1208,24 +1269,162 @@ public class PlanningService implements IPlanningService {
 
     private void appendPreviousChapterSummary(
             StringBuilder prompt,
-            ChapterPlanContextVO context
+            ChapterPlanContextVO context,
+            MemoryContextPack memoryContextPack
     ) {
-        if (hasPreviousChapterSummaryInMemory(context)) {
+        if (hasPreviousChapterSummaryInMemory(context, memoryContextPack)) {
             return;
         }
         prompt.append("【上一章】\n")
                 .append(promptValue(context.previousChapterSummary())).append("\n\n");
     }
 
-    private boolean hasPreviousChapterSummaryInMemory(ChapterPlanContextVO context) {
+    private boolean hasPreviousChapterSummaryInMemory(
+            ChapterPlanContextVO context,
+            MemoryContextPack memoryContextPack
+    ) {
         if (context.chapterNumber() == null) {
             return false;
         }
         int previousChapterNumber = context.chapterNumber() - 1;
-        return context.recentMemories().stream()
+        boolean recentMemoryHit = context.recentMemories().stream()
                 .anyMatch(memory -> memory != null
                         && Objects.equals(memory.chapterNumber(), previousChapterNumber)
                         && !isBlank(memory.shortSummary()));
+        if (recentMemoryHit) {
+            return true;
+        }
+        return memoryContextPack != null
+                && memoryContextPack.items().stream()
+                .anyMatch(item -> item.sourceChapter() == previousChapterNumber);
+    }
+
+    private MemoryContextPack buildPlanMemoryContext(
+            String projectCode,
+            int chapterNumber,
+            OutlineNodeVO currentArc,
+            List<String> hardRules,
+            MemoryMode memoryMode,
+            String generationId
+    ) {
+        MemoryMode resolvedMode = memoryMode == null
+                ? MemoryMode.defaultMode() : memoryMode;
+        List<MemoryContextItem> canonicalCandidates = resolvedMode == MemoryMode.LEGACY
+                ? List.of()
+                : safeItems(planningRepository.findCanonicalMemoryContextItems(
+                        projectCode, chapterNumber));
+        List<MemoryContextItem> legacyCandidates = resolvedMode == MemoryMode.V1
+                ? null
+                : safeItems(planningRepository.findMemoryContextItems(
+                        projectCode, chapterNumber));
+        // AUTO/LEGACY 没有长期候选时保留原 PLAN 的 recent/story_summary 展示路径；
+        // V1 即使 Canonical 暂无数据，也要继续执行以便按规则惰性触发 bridge fallback。
+        if (resolvedMode != MemoryMode.V1
+                && canonicalCandidates.isEmpty()
+                && legacyCandidates.isEmpty()) {
+            return null;
+        }
+        List<MemoryContextItem> canonicalContextCandidates = new ArrayList<>();
+        canonicalContextCandidates.addAll(canonicalCandidates);
+
+        if (currentArc != null && currentArc.title() != null && currentArc.summary() != null) {
+            MemoryContextItem arcCandidate = new MemoryContextItem(
+                    "arc-progression-" + currentArc.nodeCode(),
+                    MemoryContextCategory.CONSOLIDATED,
+                    "当前剧情段推进：" + currentArc.title().trim()
+                            + "；" + currentArc.summary().trim(),
+                    chapterNumber,
+                    false,
+                    false,
+                    false,
+                    0);
+            canonicalContextCandidates.add(arcCandidate);
+        }
+        List<String> safeRules = hardRules == null ? List.of() : hardRules;
+        for (int index = 0; index < safeRules.size(); index++) {
+            String rule = safeRules.get(index);
+            if (rule == null || rule.isBlank()) {
+                continue;
+            }
+            MemoryContextItem ruleCandidate = new MemoryContextItem(
+                    "plan-world-rule-" + index,
+                    MemoryContextCategory.RULES,
+                    rule.trim(),
+                    chapterNumber,
+                    false,
+                    false,
+                    false,
+                    0);
+            canonicalContextCandidates.add(ruleCandidate);
+        }
+
+        Set<String> openLoopIds = canonicalContextCandidates.stream()
+                .filter(item -> item.category() == MemoryContextCategory.OPEN_LOOPS)
+                .map(MemoryContextItem::itemId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        Set<String> ruleIds = canonicalContextCandidates.stream()
+                .filter(item -> item.category() == MemoryContextCategory.RULES)
+                .map(MemoryContextItem::itemId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        MemoryQuerySpec querySpec = new MemoryQuerySpec(
+                MemoryProfile.PLAN,
+                Set.of(),
+                Set.of(),
+                openLoopIds,
+                ruleIds,
+                Set.of());
+        return legacyFallbackRouter.provide(
+                resolvedMode,
+                querySpec,
+                MemoryBudgetSpec.defaultP0(),
+                canonicalContextCandidates,
+                resolvedMode == MemoryMode.V1
+                        ? () -> planningRepository.findLegacyMemoryContextItems(
+                                projectCode, chapterNumber)
+                        : () -> resolvedMode == MemoryMode.LEGACY
+                                ? combineCandidates(legacyCandidates, canonicalContextCandidates)
+                                : legacyCandidates,
+                chapterNumber,
+                false,
+                false,
+                resolvedMode != MemoryMode.LEGACY && canonicalCandidates.isEmpty(),
+                false,
+                projectCode,
+                generationId);
+    }
+
+    private List<MemoryContextItem> combineCandidates(
+            List<MemoryContextItem> first,
+            List<MemoryContextItem> second
+    ) {
+        List<MemoryContextItem> combined = new ArrayList<>();
+        if (first != null) {
+            combined.addAll(first);
+        }
+        if (second != null) {
+            combined.addAll(second);
+        }
+        return List.copyOf(combined);
+    }
+
+    private List<MemoryContextItem> safeItems(List<MemoryContextItem> items) {
+        return items == null ? List.of() : List.copyOf(items);
+    }
+
+    private String previousChapterSummary(
+            MemoryContextPack memoryContextPack,
+            int chapterNumber
+    ) {
+        if (memoryContextPack == null) {
+            return null;
+        }
+        return memoryContextPack.items().stream()
+                .filter(item -> item.sourceChapter() == chapterNumber - 1)
+                .filter(item -> item.category() == MemoryContextCategory.CONSOLIDATED
+                        || item.category() == MemoryContextCategory.EPISODES)
+                .map(MemoryContextItem::content)
+                .findFirst()
+                .orElse(null);
     }
 
     private void appendStoryBible(

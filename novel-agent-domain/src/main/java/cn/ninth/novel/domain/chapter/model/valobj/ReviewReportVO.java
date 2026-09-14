@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -37,6 +39,33 @@ public class ReviewReportVO {
     /** 是否存在需要自动返修或人工确认的问题。 */
     public boolean requiresRevision() {
         return hasSeverityAtLeast(SeverityEnum.MAJOR);
+    }
+
+    /**
+     * 将节点内的确定性检查追加到模型审核结果中。
+     * 同一问题按分类、描述和当前正文证据去重，避免模型与 deterministic check 重复报告。
+     */
+    public ReviewReportVO withAdditionalIssues(Collection<ReviewIssueVO> additionalIssues) {
+        if (additionalIssues == null || additionalIssues.isEmpty()) {
+            return this;
+        }
+        List<ReviewIssueVO> merged = new ArrayList<>();
+        if (reviewIssueVOList != null) {
+            merged.addAll(reviewIssueVOList);
+        }
+        for (ReviewIssueVO issue : additionalIssues) {
+            if (issue != null && merged.stream().noneMatch(existing -> sameIssue(existing, issue))) {
+                merged.add(issue);
+            }
+        }
+        return new ReviewReportVO(merged);
+    }
+
+    private boolean sameIssue(ReviewIssueVO left, ReviewIssueVO right) {
+        return left != null && right != null
+                && java.util.Objects.equals(left.getCategory(), right.getCategory())
+                && java.util.Objects.equals(left.getDescription(), right.getDescription())
+                && java.util.Objects.equals(left.getEvidence(), right.getEvidence());
     }
 
     private boolean hasSeverityAtLeast(SeverityEnum threshold) {

@@ -273,6 +273,35 @@ PREPARE generation_metrics_stmt FROM @generation_metrics_sql;
 EXECUTE generation_metrics_stmt;
 DEALLOCATE PREPARE generation_metrics_stmt;
 
+CREATE TABLE IF NOT EXISTS memory_retrieval_metrics (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    project_code VARCHAR(64) NOT NULL COMMENT '项目业务编码',
+    chapter_number INT UNSIGNED NOT NULL COMMENT '章节号',
+    profile VARCHAR(16) NOT NULL COMMENT 'PLAN/DRAFT/REVIEW',
+    generation_id VARCHAR(64) DEFAULT NULL COMMENT '生成工作流或运行编号',
+    memory_mode VARCHAR(32) NOT NULL COMMENT 'LEGACY/AUTO/V1 或组合路由',
+    canonical_requested BOOLEAN NOT NULL COMMENT '是否请求 Canonical',
+    canonical_hit BOOLEAN NOT NULL COMMENT 'Canonical 是否命中',
+    legacy_fallback_requested BOOLEAN NOT NULL COMMENT '是否请求 Legacy fallback',
+    legacy_fallback_hit BOOLEAN NOT NULL COMMENT 'Legacy fallback 是否命中',
+    candidate_count INT UNSIGNED NOT NULL COMMENT '候选数量',
+    filtered_count INT UNSIGNED NOT NULL COMMENT '通过规则或信号过滤后仍参与预算的候选数量',
+    selected_count INT UNSIGNED NOT NULL COMMENT '进入 Context 数量',
+    trimmed_count INT UNSIGNED NOT NULL COMMENT '预算或类别上限裁剪数量',
+    retrieval_latency_ms BIGINT UNSIGNED NOT NULL COMMENT '检索耗时毫秒',
+    estimated_tokens BIGINT UNSIGNED NOT NULL COMMENT '进入 Context 的估算 Token 数',
+    not_found_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '显式请求但候选不存在数量',
+    retrieval_miss_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '可比检索未命中数量',
+    intentional_trim_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '有意规则/信号过滤数量',
+    budget_trim_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '预算或类别上限裁剪数量',
+    context_items_json JSON NOT NULL COMMENT '仅 Context 条目元数据，不含正文',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    KEY idx_memory_retrieval_project_chapter (project_code, chapter_number, created_at),
+    KEY idx_memory_retrieval_profile (project_code, profile, chapter_number, created_at),
+    KEY idx_memory_retrieval_generation (project_code, generation_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Memory Retrieval 生产观测';
+
 CREATE TABLE IF NOT EXISTS chapter_model_trace (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
     workflow_id VARCHAR(64) NOT NULL COMMENT '章节生成工作流编号',
@@ -293,6 +322,97 @@ CREATE TABLE IF NOT EXISTS chapter_model_trace (
     KEY idx_chapter_model_trace_chapter (project_code, chapter_number, node, created_at),
     KEY idx_chapter_model_trace_failure (success, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='章节模型 Prompt 调试 Trace';
+
+-- P0.5 Canonical Gate。正式记忆只允许由 MemoryCommitGate 写入。
+-- PGVector 不在本事务中写入，只消费 memory_outbox。
+CREATE TABLE IF NOT EXISTS memory_commit (
+    commit_key VARCHAR(255) NOT NULL COMMENT 'Canonical Gate 幂等键',
+    project_code VARCHAR(64) NOT NULL COMMENT '项目业务编码',
+    chapter_number INT UNSIGNED NOT NULL COMMENT '章节号',
+    chapter_version VARCHAR(255) NOT NULL COMMENT '最终正文版本',
+    content_hash CHAR(64) NOT NULL COMMENT '最终正文 SHA-256',
+    final_content LONGTEXT NOT NULL COMMENT '已接受的最终正文',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (commit_key),
+    UNIQUE KEY uk_memory_commit_source
+        (project_code, chapter_number, chapter_version, content_hash),
+    KEY idx_memory_commit_chapter (project_code, chapter_number, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Canonical Gate 幂等提交';
+
+CREATE TABLE IF NOT EXISTS memory_accepted_chapter_version (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    commit_key VARCHAR(255) NOT NULL COMMENT 'Canonical Gate 幂等键',
+    project_code VARCHAR(64) NOT NULL COMMENT '项目业务编码',
+    chapter_number INT UNSIGNED NOT NULL COMMENT '章节号',
+    chapter_version VARCHAR(255) NOT NULL COMMENT '最终正文版本',
+    content_hash CHAR(64) NOT NULL COMMENT '最终正文 SHA-256',
+    final_content LONGTEXT NOT NULL COMMENT '已接受的最终正文',
+    accepted_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_memory_accepted_commit (commit_key),
+    UNIQUE KEY uk_memory_accepted_source
+        (project_code, chapter_number, chapter_version, content_hash),
+    KEY idx_memory_accepted_chapter (project_code, chapter_number, accepted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='已接受章节正文版本';
+
+CREATE TABLE IF NOT EXISTS memory_canonical_event (
+    event_id VARCHAR(128) NOT NULL COMMENT '稳定事件编号',
+    project_code VARCHAR(64) NOT NULL COMMENT '项目业务编码',
+    chapter_number INT UNSIGNED NOT NULL COMMENT '来源章节号',
+    description TEXT NOT NULL COMMENT '事件描述',
+    chapter_version VARCHAR(255) NOT NULL COMMENT '来源正文版本',
+    content_hash CHAR(64) NOT NULL COMMENT '来源正文 SHA-256',
+    evidence_start_offset INT UNSIGNED NOT NULL COMMENT '证据起始偏移（UTF-16）',
+    evidence_end_offset INT UNSIGNED NOT NULL COMMENT '证据结束偏移（UTF-16）',
+    evidence_excerpt TEXT NOT NULL COMMENT '正文证据片段',
+    story_time VARCHAR(255) DEFAULT NULL COMMENT '故事内时间',
+    candidate_id VARCHAR(128) NOT NULL COMMENT '产生该事件的 Candidate',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (event_id),
+    KEY idx_memory_event_chapter (project_code, chapter_number, chapter_version),
+    KEY idx_memory_event_candidate (candidate_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Canonical Event';
+
+CREATE TABLE IF NOT EXISTS memory_canonical_fact (
+    fact_id VARCHAR(128) NOT NULL COMMENT '稳定事实编号',
+    project_code VARCHAR(64) NOT NULL COMMENT '项目业务编码',
+    proposition TEXT NOT NULL COMMENT '事实命题',
+    source_ids_json JSON NOT NULL COMMENT '可追溯来源集合',
+    status VARCHAR(32) NOT NULL COMMENT 'FACT_ACTIVE/FACT_ARCHIVED/FACT_INVALIDATED',
+    candidate_id VARCHAR(128) NOT NULL COMMENT '最近一次产生或强化它的 Candidate',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (fact_id),
+    KEY idx_memory_fact_active (project_code, status, updated_at),
+    KEY idx_memory_fact_candidate (candidate_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Canonical Fact';
+
+CREATE TABLE IF NOT EXISTS memory_canonical_projection (
+    projection_id VARCHAR(128) NOT NULL COMMENT '稳定投影编号',
+    project_code VARCHAR(64) NOT NULL COMMENT '项目业务编码',
+    content TEXT NOT NULL COMMENT '派生投影内容',
+    source_ids_json JSON NOT NULL COMMENT '投影来源集合',
+    status VARCHAR(32) NOT NULL COMMENT 'PROJECTION_ACTIVE/PROJECTION_STALE/PROJECTION_ARCHIVED',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (projection_id),
+    KEY idx_memory_projection_status (project_code, status, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Canonical Projection';
+
+CREATE TABLE IF NOT EXISTS memory_outbox (
+    outbox_id CHAR(64) NOT NULL COMMENT '幂等 outbox 编号',
+    commit_key VARCHAR(255) NOT NULL COMMENT '来源 Canonical Commit',
+    aggregate_type VARCHAR(32) NOT NULL COMMENT 'EVENT/FACT/PROJECTION',
+    aggregate_id VARCHAR(128) NOT NULL COMMENT '聚合编号',
+    payload LONGTEXT NOT NULL COMMENT '异步派生任务载荷',
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/PROCESSING/DONE/FAILED',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (outbox_id),
+    UNIQUE KEY uk_memory_outbox_aggregate (commit_key, aggregate_type, aggregate_id),
+    KEY idx_memory_outbox_pending (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Canonical 异步派生 outbox';
 
 CREATE TABLE IF NOT EXISTS LANGRAPH4J_THREAD (
     thread_id VARCHAR(36) NOT NULL COMMENT '内部线程 UUID',

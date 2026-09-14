@@ -28,7 +28,7 @@ spring:
       base-url:  https://api.deepseek.com
       chat:
         model: deepseek-v4-flash
-        temperature: 0.7
+        temperature: 0.5
         timeout: 330s
     retry:
       max-attempts: 3

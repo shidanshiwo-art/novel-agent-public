@@ -64,7 +64,7 @@ class DesignTokensAndScrollContractTest {
         assertThat(canvas).contains(".chapter-canvas { flex: 1; min-width: 0; min-height: 0; overflow-y: auto;");
         assertThat(outline)
                 .contains(".outline-detail {\n  min-width: 0;\n  min-height: 0;\n  overflow-y: auto;")
-                .contains(":global(.ai-next-dialog .el-dialog__body) {\n  max-height: calc(100vh - 180px);\n  overflow-y: auto;")
+                .contains(":global(.ai-generation-drawer .el-drawer__body) {\n  min-width: 0;\n  overflow-x: hidden;\n  padding: 20px clamp(18px, 3vw, 32px) 24px;")
                 .contains("@media (max-width: 767px) {\n  .outline-workbench {\n    height: 100%;\n    min-height: 0;")
                 .doesNotContain(".ai-next-draft-form {\n  max-height:", ".ai-next-draft-form {\n  max-height: min(58vh");
 

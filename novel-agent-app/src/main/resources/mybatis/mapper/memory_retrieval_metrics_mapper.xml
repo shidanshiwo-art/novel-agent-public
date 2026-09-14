@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.ninth.novel.infrastructure.dao.IMemoryRetrievalMetricsDao">
+    <resultMap id="memoryRetrievalMetricsMap"
+               type="cn.ninth.novel.infrastructure.dao.po.MemoryRetrievalMetricsPO">
+        <id column="id" property="id"/>
+        <result column="project_code" property="projectCode"/>
+        <result column="chapter_number" property="chapterNumber"/>
+        <result column="profile" property="profile"/>
+        <result column="generation_id" property="generationId"/>
+        <result column="memory_mode" property="memoryMode"/>
+        <result column="canonical_requested" property="canonicalRequested"/>
+        <result column="canonical_hit" property="canonicalHit"/>
+        <result column="legacy_fallback_requested" property="legacyFallbackRequested"/>
+        <result column="legacy_fallback_hit" property="legacyFallbackHit"/>
+        <result column="candidate_count" property="candidateCount"/>
+        <result column="filtered_count" property="filteredCount"/>
+        <result column="selected_count" property="selectedCount"/>
+        <result column="trimmed_count" property="trimmedCount"/>
+        <result column="retrieval_latency_ms" property="retrievalLatencyMs"/>
+        <result column="estimated_tokens" property="estimatedTokens"/>
+        <result column="not_found_count" property="notFoundCount"/>
+        <result column="retrieval_miss_count" property="retrievalMissCount"/>
+        <result column="intentional_trim_count" property="intentionalTrimCount"/>
+        <result column="budget_trim_count" property="budgetTrimCount"/>
+        <result column="context_items_json" property="contextItemsJson"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert"
+            parameterType="cn.ninth.novel.infrastructure.dao.po.MemoryRetrievalMetricsPO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO memory_retrieval_metrics (
+            project_code, chapter_number, profile, generation_id, memory_mode,
+            canonical_requested, canonical_hit,
+            legacy_fallback_requested, legacy_fallback_hit,
+            candidate_count, filtered_count, selected_count, trimmed_count,
+            retrieval_latency_ms, estimated_tokens,
+            not_found_count, retrieval_miss_count,
+            intentional_trim_count, budget_trim_count,
+            context_items_json
+        ) VALUES (
+            #{projectCode}, #{chapterNumber}, #{profile}, #{generationId}, #{memoryMode},
+            #{canonicalRequested}, #{canonicalHit},
+            #{legacyFallbackRequested}, #{legacyFallbackHit},
+            #{candidateCount}, #{filteredCount}, #{selectedCount}, #{trimmedCount},
+            #{retrievalLatencyMs}, #{estimatedTokens},
+            #{notFoundCount}, #{retrievalMissCount},
+            #{intentionalTrimCount}, #{budgetTrimCount},
+            CAST(#{contextItemsJson} AS JSON)
+        )
+    </insert>
+
+    <select id="query" resultMap="memoryRetrievalMetricsMap">
+        SELECT id, project_code, chapter_number, profile, generation_id, memory_mode,
+               canonical_requested, canonical_hit,
+               legacy_fallback_requested, legacy_fallback_hit,
+               candidate_count, filtered_count, selected_count, trimmed_count,
+               retrieval_latency_ms, estimated_tokens,
+               not_found_count, retrieval_miss_count,
+               intentional_trim_count, budget_trim_count,
+               context_items_json, created_at
+        FROM memory_retrieval_metrics
+        WHERE project_code = #{projectCode}
+        <if test="chapterNumber != null">
+            AND chapter_number = #{chapterNumber}
+        </if>
+        <if test="profile != null and profile != ''">
+            AND profile = #{profile}
+        </if>
+        <if test="generationId != null and generationId != ''">
+            AND generation_id = #{generationId}
+        </if>
+        ORDER BY created_at ASC, id ASC
+    </select>
+</mapper>

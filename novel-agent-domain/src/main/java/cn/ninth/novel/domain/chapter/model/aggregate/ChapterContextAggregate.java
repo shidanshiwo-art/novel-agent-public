@@ -5,6 +5,7 @@ import cn.ninth.novel.domain.chapter.model.entity.NovelProjectEntity;
 import cn.ninth.novel.domain.chapter.model.entity.StoryBibleEntity;
 import cn.ninth.novel.domain.chapter.model.entity.StoryCharacterEntity;
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterHistoryVO;
+import cn.ninth.novel.domain.memory.model.MemoryContextPack;
 import cn.ninth.novel.domain.planning.model.valobj.OutlineNodeVO;
 import cn.ninth.novel.domain.planning.model.valobj.enums.OutlineNodeKindEnum;
 import cn.ninth.novel.types.enums.ResponseCode;
@@ -39,6 +40,10 @@ public class ChapterContextAggregate {
     private List<StoryCharacterEntity> characters;
     /** 当前章节之前的历史快照，用于衔接前文并避免剧情断裂。 */
     private ChapterHistoryVO history;
+    /** DRAFT Profile 预算后的统一记忆上下文；为空时沿用旧历史结构。 */
+    private MemoryContextPack memoryContextPack;
+    /** REVIEW Profile 的 Canonical 历史证据；不混入 DRAFT 当前状态上下文。 */
+    private MemoryContextPack reviewMemoryContextPack;
 
     /**
      * 校验当前上下文是否具备生成章节的前置条件。

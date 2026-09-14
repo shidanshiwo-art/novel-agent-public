@@ -7,6 +7,9 @@ import cn.ninth.novel.domain.chapter.model.valobj.ChapterGenerationResultVO;
 import cn.ninth.novel.domain.chapter.model.valobj.ReviewIssueVO;
 import cn.ninth.novel.domain.chapter.model.valobj.enums.HumanDecisionEnum;
 import cn.ninth.novel.domain.chapter.service.IChapterService;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
+import cn.ninth.novel.types.enums.ResponseCode;
+import cn.ninth.novel.types.exception.AppException;
 import cn.ninth.novel.types.response.Response;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -45,6 +48,19 @@ public class NovelChapterController {
         )));
     }
 
+    /** 实验运行参数入口；只切换 Memory 读取路由。 */
+    @PostMapping(value = "/generate", params = "memoryMode")
+    public Response<GenerateChapterResponseDTO> generateChapter(
+            @RequestBody GenerateChapterRequestDTO request,
+            @org.springframework.web.bind.annotation.RequestParam String memoryMode
+    ) {
+        return Response.success(toResponse(chapterService.generateChapter(
+                request.projectId(),
+                request.chapterNumber(),
+                parseMemoryMode(memoryMode)
+        )));
+    }
+
     @PostMapping("/{workflowId}/resume")
     public Response<GenerateChapterResponseDTO> resumeChapter(
             @PathVariable String workflowId,
@@ -77,5 +93,14 @@ public class NovelChapterController {
                 result.completedStages(),
                 result.canHumanRevise()
         );
+    }
+
+    private MemoryMode parseMemoryMode(String value) {
+        try {
+            return MemoryMode.parse(value);
+        } catch (IllegalArgumentException exception) {
+            throw AppException.user(
+                    ResponseCode.ILLEGAL_PARAMETER.getCode(), exception.getMessage());
+        }
     }
 }

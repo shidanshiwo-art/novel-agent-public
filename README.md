@@ -2,13 +2,21 @@
 
 面向长篇小说持续创作的 AI Agent 工作台。把写一章拆成可恢复的规划、生成、审核、改稿、记忆压缩和持久化流程，并提供 Vue 3 创作界面。
 
+## 本次更新（2026 年 9 月）
+
+- 增加 Memory V1：定稿章节提取有正文证据的事件、事实和未完成线索，写入 Canonical Memory；下一章按相关性和预算读取，减少重复确认和无关历史干扰。
+- 重构章节审核：先准备相关上下文，再分别检查连续性与文本质量；只对必须修复的问题定向改稿，并在最多两轮修改后做回归检查或交给人工处理。
+- 完善生成会话恢复、章节计划衔接和创作工作台交互，增加记忆召回与模型调用指标，便于观察长流程运行情况。
+
+**测试结果：**本次公开快照的 31 项定向测试全部通过，前端生产构建通过；六章记忆闭环回放中，第 11～15 章新写入的 Canonical Memory 均被下一章召回。真实模型对已完成的第 14、16 章进行审核回放：第 16 章的硬冲突误报由 2 次降为 0 次，自动改稿由 3 轮降为 0 轮；两章合计审核 token 从旧流程至少 226,200 降至 73,418（按旧流程下界计算，减少至少 67.5%）。第 14 章的目标人物位置冲突仍漏检，最终转人工处理，因此当前效果结论仅适用于这两章回放，不代表整体小说质量已提升。
+
 ## 能做什么
 
 - 维护故事设定、规则和写作风格；
 - 管理角色档案，并让模型补充人物草稿；
 - 按“全书 → 分卷 → 章节”的层级推进大纲；
-- 生成章节初稿，自动 Review / Revise，必要时交给人工确认；
-- 将章节压缩为短期记忆和故事状态快照，支持跨章连续性；
+- 生成章节初稿，检查连续性和文本质量，定向改稿并做回归检查，必要时交给人工确认；
+- 将定稿章节转为可追溯的长期记忆，并保留短期记忆和故事状态，支持跨章连续性；
 - 使用 MySQL Checkpoint 恢复长流程，使用 SSE 接收生成进度；
 - 查看章节正文、编辑内容、更新章节记忆。
 
@@ -50,9 +58,12 @@ flowchart LR
 一次章节生成的主要路径是：
 
 ```text
-LOAD_CONTEXT → DRAFT → REVIEW
-                    ├─ 通过 / 轻微问题 → COMPRESSION → PERSIST
-                    └─ 重大问题 → REVISE → REVIEW
+LOAD_CONTEXT → DRAFT → PREPARE_REVIEW_CONTEXT
+             → CONTINUITY_VALIDATION → QUALITY_REVIEW → REPAIR_PLAN
+                    ├─ 无必修问题 → COMPRESSION → PERSIST
+                    └─ 定向改稿 → REGRESSION_CHECK
+                                   ├─ 通过 → COMPRESSION → PERSIST
+                                   └─ 未解决 → 再改稿 / 人工处理
 ```
 
 ### 模块职责
@@ -129,7 +140,7 @@ mysql -uroot -p < docs/sql/seed.sql
 `seed.sql` 写入的是 `demo-story` 演示项目。
 SQL 脚本位于 `docs/sql`，应用不会通过 Spring Boot 自动初始化数据库。
 
-### 3. 填写 YAML 配置
+### 3. 配置环境变量
 
 公共配置在 `novel-agent-app/src/main/resources/application.yml`，通常不需要修改。启动开发环境时，Spring Boot 会叠加 `application-dev.yml`。
 
@@ -158,30 +169,6 @@ export SPRING_DATASOURCE_URL='jdbc:mysql://127.0.0.1:3306/novel_agent?createData
 export SPRING_DATASOURCE_USERNAME=root
 export SPRING_DATASOURCE_PASSWORD='你的数据库密码'
 export SPRING_AI_OPENAI_API_KEY='你的模型 API Key'
-```
-
-`public` 分支中的 `application-dev.yml` 关键部分如下，数据库密码和 API Key 通过环境变量注入：
-
-```yaml
-server:
-  port: 18091
-
-spring:
-  datasource:
-    url: ${SPRING_DATASOURCE_URL}
-    username: ${SPRING_DATASOURCE_USERNAME}
-    password: ${SPRING_DATASOURCE_PASSWORD}
-  ai:
-    model:
-      chat: openai
-      embedding: none
-    openai:
-      api-key: ${SPRING_AI_OPENAI_API_KEY}
-      base-url: https://api.deepseek.com
-      chat:
-        model: deepseek-v4-flash
-        temperature: 0.7
-        timeout: 330s
 ```
 
 `application-prod.yml` 使用同一组 `SPRING_DATASOURCE_*` 和 `SPRING_AI_OPENAI_API_KEY` 环境变量。`application-stress.yml` 也使用同一组数据库环境变量，连接地址由 `SPRING_DATASOURCE_URL` 指定。

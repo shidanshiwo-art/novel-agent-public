@@ -1,6 +1,7 @@
 package cn.ninth.novel.domain.chapter.service.workflow;
 
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
 import org.bsc.langgraph4j.state.AgentState;
 import org.junit.jupiter.api.Test;
 
@@ -40,6 +41,21 @@ class ChapterGraphStateTest {
         assertThat(state.draft()).contains("chapter draft");
         assertThat(state.chapterMemory()).contains(chapterMemory);
         assertThat(state.currentNode()).contains("COMPRESSION");
+    }
+
+    @Test
+    void shouldKeepMemoryModeInWorkflowStateForAllDownstreamStages() {
+        ChapterGraphState state = new ChapterGraphState(Map.of(
+                ChapterGraphKeys.MEMORY_MODE, MemoryMode.V1
+        ));
+
+        System.out.printf("Workflow Memory mode checkpoint: %s%n", state.memoryMode());
+        assertThat(state.memoryMode()).isEqualTo(MemoryMode.V1);
+        assertThat(new ChapterGraphState(Map.of(
+                ChapterGraphKeys.MEMORY_MODE, "LEGACY"
+        )).memoryMode()).isEqualTo(MemoryMode.LEGACY);
+        assertThat(new ChapterGraphState(Map.of()).memoryMode())
+                .isEqualTo(MemoryMode.AUTO);
     }
 
     @Test

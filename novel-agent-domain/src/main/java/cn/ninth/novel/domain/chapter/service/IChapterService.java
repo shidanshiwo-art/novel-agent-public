@@ -5,6 +5,8 @@ import cn.ninth.novel.domain.chapter.model.entity.GenerationMetricsDO;
 import cn.ninth.novel.domain.chapter.model.valobj.GenerationMetricsSummaryVO;
 import cn.ninth.novel.domain.chapter.model.valobj.enums.HumanDecisionEnum;
 import cn.ninth.novel.domain.chapter.service.session.ChapterGenerationSessionSnapshot;
+import cn.ninth.novel.domain.memory.model.MemoryMode;
+import cn.ninth.novel.domain.chapter.service.workflow.ChapterGenerationVariant;
 
 import java.util.Optional;
 import java.util.List;
@@ -26,6 +28,25 @@ public interface IChapterService {
      */
     ChapterGenerationResultVO generateChapter(String projectCode, int chapterNumber);
 
+    /** 使用指定 Memory 路由模式同步生成章节。 */
+    default ChapterGenerationResultVO generateChapter(
+            String projectCode,
+            int chapterNumber,
+            MemoryMode memoryMode
+    ) {
+        return generateChapter(projectCode, chapterNumber);
+    }
+
+    /** 使用指定 V1 实验变体生成章节；普通调用默认使用改进实现。 */
+    default ChapterGenerationResultVO generateChapter(
+            String projectCode,
+            int chapterNumber,
+            MemoryMode memoryMode,
+            ChapterGenerationVariant generationVariant
+    ) {
+        return generateChapter(projectCode, chapterNumber, memoryMode);
+    }
+
     /**
      * 创建章节生成会话并异步启动章节工作流。
      *
@@ -35,6 +56,15 @@ public interface IChapterService {
      */
     default String createGenerationSession(String projectCode, int chapterNumber) {
         throw new UnsupportedOperationException("当前章节服务未提供异步生成会话能力");
+    }
+
+    /** 使用指定 Memory 路由模式创建章节生成会话。 */
+    default String createGenerationSession(
+            String projectCode,
+            int chapterNumber,
+            MemoryMode memoryMode
+    ) {
+        return createGenerationSession(projectCode, chapterNumber);
     }
 
     /**

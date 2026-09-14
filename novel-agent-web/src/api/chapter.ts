@@ -6,11 +6,23 @@ import type {
   GenerationSessionEvent,
   GenerationSessionEventType,
   ResumeChapterRequest,
+  MemoryMode,
 } from '../types'
 
 export const createGenerationSession = (projectCode: string, chapterNumber: number) =>
   http.post<any, GenerationSessionResponse>(
     `/v1/novels/projects/${projectCode}/chapters/${chapterNumber}/generation-sessions`
+  )
+
+export const createGenerationSessionWithMode = (
+  projectCode: string,
+  chapterNumber: number,
+  memoryMode?: MemoryMode,
+) =>
+  http.post<any, GenerationSessionResponse>(
+    `/v1/novels/projects/${projectCode}/chapters/${chapterNumber}/generation-sessions${
+      memoryMode ? `?memoryMode=${encodeURIComponent(memoryMode)}` : ''
+    }`
   )
 
 export const getActiveGenerationSession = (projectCode: string, chapterNumber: number) =>

@@ -171,9 +171,22 @@
     <el-drawer
       v-model="chapterPlanDrawerVisible"
       :title="chapterPlanDrawerTitle"
-      size="min(560px, 100%)"
+      class="ai-generation-drawer"
+      direction="rtl"
+      :size="chapterPlanDrawerSize"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :before-close="guardChapterPlanDrawerClose"
       append-to-body
     >
+      <template #header>
+        <div class="ai-generation-drawer-header">
+          <span>{{ chapterPlanDrawerTitle }}</span>
+          <el-button text size="small" @click="toggleChapterPlanDrawer">
+            {{ chapterPlanDrawerExpanded ? '恢复默认宽度' : '一键展开' }}
+          </el-button>
+        </div>
+      </template>
       <div class="chapter-plan-drawer" aria-label="章节计划编辑">
         <div class="chapter-plan-drawer-head">
           <div>
@@ -250,7 +263,7 @@
         </section>
 
         <div class="chapter-plan-drawer-actions">
-          <el-button @click="chapterPlanDrawerVisible = false">取消</el-button>
+          <el-button :disabled="chapterPlanGenerating || chapterPlanConfirming || chapterPlanUpdating" @click="requestCloseChapterPlanDrawer">取消</el-button>
           <el-button
             v-if="chapterPlanDraft"
             type="success"
@@ -281,11 +294,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { acceptGenerationSession, createGenerationSession, getActiveGenerationSession, resumeChapter, stopGenerationSession, subscribeGenerationSessionEvents } from '../api/chapter'
+import { acceptGenerationSession, createGenerationSession, createGenerationSessionWithMode, getActiveGenerationSession, resumeChapter, stopGenerationSession, subscribeGenerationSessionEvents } from '../api/chapter'
 import { ApiBusinessError } from '../api/http'
 import { confirmChapterPlan, generateChapterPlan, listChapterPlans, listOutlineNodes, updateChapterPlan } from '../api/planning'
 import { useProjectStore } from '../stores/project'
-import type { ChapterPlan, GenerateChapterResponse, GenerationSessionEvent, GenerationSessionResponse, OutlineNode, PlanningDraftResponse, WorkflowStatus } from '../types'
+import type { ChapterPlan, GenerateChapterResponse, GenerationSessionEvent, GenerationSessionResponse, MemoryMode, OutlineNode, PlanningDraftResponse, WorkflowStatus } from '../types'
 import { domainLabel, statusLabel, statusTone } from '../utils/uiSemantics'
 import ChapterCanvas from '../components/workbench/ChapterCanvas.vue'
 import ChapterDirectory, { type ChapterDirectoryVolume } from '../components/workbench/ChapterDirectory.vue'
@@ -315,6 +328,15 @@ type ActiveGenerationSessionSnapshot = {
 const router = useRouter()
 const route = useRoute()
 const projectStore = useProjectStore()
+
+const experimentMemoryMode = computed<MemoryMode | undefined>(() => {
+  const value = route.query.memoryMode
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toUpperCase()
+  return ['LEGACY', 'V1', 'AUTO'].includes(normalized)
+    ? normalized as MemoryMode
+    : undefined
+})
 
 const initializingGenerationPage = ref(true)
 const generationPageInitialized = ref(false)
@@ -358,6 +380,7 @@ const chapterPlanDraftId = ref('')
 const chapterPlanConfirming = ref(false)
 const chapterPlanUpdating = ref(false)
 const chapterPlanDrawerVisible = ref(false)
+const chapterPlanDrawerExpanded = ref(false)
 const chapterPlanDrawerMode = ref<'edit' | 'ai'>('edit')
 const chapterPlanEditor = ref<ChapterPlanDraft>({ summary: '' })
 const workflowStageCode = ref<WorkflowStageCode | ''>('')
@@ -599,6 +622,9 @@ const chapterDirectoryVolumes = computed<ChapterDirectoryVolume[]>(() => chapter
 })))
 const chapterPlanDrawerTitle = computed(() =>
   chapterPlanDrawerMode.value === 'ai' ? 'AI 生成/调整章节计划' : '编辑章节计划',
+)
+const chapterPlanDrawerSize = computed(() =>
+  chapterPlanDrawerExpanded.value ? 'max(80vw, 720px)' : '720px',
 )
 
 function chapterNumberForArc(arc: OutlineNode | null, direction: -1 | 1) {
@@ -1069,6 +1095,7 @@ onBeforeUnmount(() => {
 function openChapterPlanEditor() {
   if (!chapterPlan.value) return
   chapterPlanDrawerMode.value = 'edit'
+  chapterPlanDrawerExpanded.value = false
   chapterPlanEditor.value = {
     summary: chapterPlan.value.summary,
   }
@@ -1105,10 +1132,31 @@ function replaceChapterPlanInHistory(plan: ChapterPlan) {
 function openChapterPlanAi() {
   if (!currentChapterArc.value || outlineLoadFailed.value) return
   chapterPlanDrawerMode.value = 'ai'
+  chapterPlanDrawerExpanded.value = false
   chapterPlanEditor.value = {
     summary: chapterPlan.value?.summary ?? '',
   }
   chapterPlanDrawerVisible.value = true
+}
+
+function toggleChapterPlanDrawer() {
+  chapterPlanDrawerExpanded.value = !chapterPlanDrawerExpanded.value
+}
+
+function guardChapterPlanDrawerClose(done: () => void) {
+  if (chapterPlanGenerating.value || chapterPlanConfirming.value || chapterPlanUpdating.value) {
+    ElMessage.warning('章节计划正在处理中，请等待完成')
+    return
+  }
+  done()
+}
+
+function requestCloseChapterPlanDrawer() {
+  if (chapterPlanGenerating.value || chapterPlanConfirming.value || chapterPlanUpdating.value) {
+    ElMessage.warning('章节计划正在处理中，请等待完成')
+    return
+  }
+  chapterPlanDrawerVisible.value = false
 }
 
 async function generateCurrentChapterPlan() {
@@ -1126,6 +1174,7 @@ async function generateCurrentChapterPlan() {
       projectCode,
       chapterNumber,
       { requirement: chapterPlanRequirement.value.trim() },
+      experimentMemoryMode.value,
     )
     const payload = draft.payload
     if (!payload || typeof payload.summary !== 'string') {
@@ -1239,10 +1288,15 @@ async function generateSingleChapter() {
   generationSession.value = null
   result.value = null
   try {
-    generationSession.value = await createGenerationSession(
-      projectCode,
-      chapterNumber,
-    )
+    if (experimentMemoryMode.value) {
+      generationSession.value = await createGenerationSessionWithMode(
+        projectCode,
+        chapterNumber,
+        experimentMemoryMode.value,
+      )
+    } else {
+      generationSession.value = await createGenerationSession(projectCode, chapterNumber)
+    }
     await loadActiveGenerationSession()
     ElMessage.success('章节生成已启动')
   } catch (error) {
@@ -1383,6 +1437,10 @@ function chapterPlanHistoryStatus(plan: ChapterPlan | null) {
 .generate-button { min-width: 112px; }
 .stop-button { min-width: 112px; }
 .primary-link { font-weight: 600; white-space: nowrap; }
+.ai-generation-drawer-header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-generation-drawer-header > span { min-width: 0; overflow: hidden; color: var(--text); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+:global(.ai-generation-drawer.el-drawer) { min-width: min(680px, 100vw); max-width: 100vw; }
+:global(.ai-generation-drawer .el-drawer__body) { min-width: 0; overflow-x: hidden; padding: 20px clamp(18px, 3vw, 32px) 24px; }
 .workflow-review-summary, .workflow-message-panel { width: min(var(--workbench-content-width), calc(100% - 48px)); box-sizing: border-box; margin-inline: auto; }
 .workflow-review-summary { min-width: 0; padding: 14px 0 0; border-bottom: 1px solid var(--border); }
 .result-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

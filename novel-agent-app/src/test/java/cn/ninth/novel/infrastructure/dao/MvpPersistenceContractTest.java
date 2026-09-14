@@ -31,6 +31,12 @@ class MvpPersistenceContractTest {
             "story_summary",
             "generation_metrics",
             "chapter_model_trace",
+            "memory_commit",
+            "memory_accepted_chapter_version",
+            "memory_canonical_event",
+            "memory_canonical_fact",
+            "memory_canonical_projection",
+            "memory_outbox",
             "LANGRAPH4J_THREAD",
             "LANGRAPH4J_CHECKPOINT");
 

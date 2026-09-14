@@ -3,6 +3,8 @@ package cn.ninth.novel.infrastructure.adapter.repository;
 import cn.ninth.novel.domain.chapter.adapter.repository.IChapterPersistRepository;
 import cn.ninth.novel.domain.chapter.model.valobj.ChapterMemoryVO;
 import cn.ninth.novel.domain.chapter.model.valobj.StoryStateSnapshot;
+import cn.ninth.novel.domain.memory.model.MemoryCommitRequest;
+import cn.ninth.novel.domain.memory.service.MemoryCommitGate;
 import cn.ninth.novel.infrastructure.dao.INovelProjectDao;
 import cn.ninth.novel.infrastructure.dao.IChapterPlanDao;
 import cn.ninth.novel.infrastructure.dao.IOutlineNodeDao;
@@ -33,6 +35,7 @@ public class ChapterPersistRepository implements IChapterPersistRepository {
     private final IStoryChapterDao storyChapterDao;
     private final IStorySummaryDao storySummaryDao;
     private final ObjectMapper objectMapper;
+    private final MemoryCommitGate memoryCommitGate;
 
     public ChapterPersistRepository(
             INovelProjectDao novelProjectDao,
@@ -40,7 +43,8 @@ public class ChapterPersistRepository implements IChapterPersistRepository {
             IOutlineNodeDao outlineNodeDao,
             IStoryChapterDao storyChapterDao,
             IStorySummaryDao storySummaryDao,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            MemoryCommitGate memoryCommitGate
     ) {
         this.novelProjectDao = novelProjectDao;
         this.chapterPlanDao = chapterPlanDao;
@@ -48,6 +52,7 @@ public class ChapterPersistRepository implements IChapterPersistRepository {
         this.storyChapterDao = storyChapterDao;
         this.storySummaryDao = storySummaryDao;
         this.objectMapper = objectMapper;
+        this.memoryCommitGate = memoryCommitGate;
     }
 
     /**
@@ -67,6 +72,44 @@ public class ChapterPersistRepository implements IChapterPersistRepository {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void persist(
+            String projectCode,
+            int chapterNumber,
+            String content,
+            ChapterMemoryVO chapterMemory,
+            StoryStateSnapshot storyStateSnapshot
+    ) {
+        persistChapterInTransaction(
+                projectCode, chapterNumber, content, chapterMemory, storyStateSnapshot);
+    }
+
+    /**
+     * 章节正文与 Canonical Gate 共用一个 MySQL 业务事务。
+     * Gate 失败时不会留下正文、Canonical、Fact 状态或 outbox。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void persistWithMemoryCommit(
+            String projectCode,
+            int chapterNumber,
+            String content,
+            ChapterMemoryVO chapterMemory,
+            StoryStateSnapshot storyStateSnapshot,
+            MemoryCommitRequest memoryCommitRequest
+    ) {
+        if (memoryCommitRequest == null) {
+            throw illegalParameter("PERSIST 缺少 MemoryCommitRequest");
+        }
+        if (!projectCode.equals(memoryCommitRequest.projectCode())
+                || chapterNumber != memoryCommitRequest.chapterNumber()
+                || !content.equals(memoryCommitRequest.finalContent())) {
+            throw illegalParameter("MemoryCommitRequest 与最终章节正文不一致");
+        }
+        memoryCommitGate.commit(memoryCommitRequest);
+        persistChapterInTransaction(
+                projectCode, chapterNumber, content, chapterMemory, storyStateSnapshot);
+    }
+
+    private void persistChapterInTransaction(
             String projectCode,
             int chapterNumber,
             String content,

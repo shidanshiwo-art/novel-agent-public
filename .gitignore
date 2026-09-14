@@ -20,6 +20,8 @@ application-local.yaml
 **/application-local.yml
 **/application-local.yaml
 docs/implementation-summary.md
+docs/*-report.md
+docs/novel-001-*.md
 
 # 前端依赖和构建产物
 node_modules/

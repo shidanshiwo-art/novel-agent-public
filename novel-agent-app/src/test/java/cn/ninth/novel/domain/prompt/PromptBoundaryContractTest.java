@@ -233,7 +233,7 @@ class PromptBoundaryContractTest {
     }
 
     @Test
-    void draftSystemPromptShouldKeepOnlyCoreGenerationConstraints() {
+    void draftSystemPromptShouldKeepCoreGenerationAndDialogueConstraints() {
         String prompt = SystemPrompt.DRAFT_SYSTEM_PROMPT;
         long nonBlankLineCount = prompt.lines()
                 .filter(line -> !line.isBlank())
@@ -250,8 +250,38 @@ class PromptBoundaryContractTest {
                 .contains("只完成当前章节，不提前写完未来章节")
                 .contains("只输出当前章节正文")
                 .doesNotContain("最终只输出小说正文", "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.");
-        assertThat(nonBlankLineCount).isLessThanOrEqualTo(8);
+        assertThat(nonBlankLineCount).isLessThanOrEqualTo(12);
         assertThat(countOccurrences(prompt, "本章计划")).isEqualTo(1);
+    }
+
+    @Test
+    void draftSystemPromptShouldGuideNaturalDialogueAndReduceNarrativeExplanation() {
+        String prompt = SystemPrompt.DRAFT_SYSTEM_PROMPT;
+
+        System.out.printf(
+                "DRAFT 对话自然度约束：naturalDialogue=%s, differentiatedVoices=%s, explanationReduction=%s%n",
+                prompt.contains("允许省略、停顿、打断、答非所问"),
+                prompt.contains("沈夜偏简短、克制、分析型")
+                        && prompt.contains("郝乐偏口语、跳跃、随意")
+                        && prompt.contains("赵铁峰偏经验式、粗短、直接"),
+                prompt.contains("少写解释性补充")
+                        && prompt.contains("同一章节出现过密时主动改用具体动作、反应或自然说法")
+        );
+        assertThat(prompt)
+                .contains(
+                        "允许省略、停顿、打断、答非所问",
+                        "不要为了传递设定，把完整因果链或说明书式信息一次性塞进台词",
+                        "沈夜偏简短、克制、分析型",
+                        "郝乐偏口语、跳跃、随意",
+                        "赵铁峰偏经验式、粗短、直接",
+                        "不要让所有角色共享同一种完整、理性的表达",
+                        "少写解释性补充",
+                        "动作或台词已经表达情绪、动机和含义时，不要紧跟总结句",
+                        "不……而是……",
+                        "没有……只是……",
+                        "不是……是……",
+                        "同一章节出现过密时主动改用具体动作、反应或自然说法"
+                );
     }
 
     @Test
@@ -277,6 +307,46 @@ class PromptBoundaryContractTest {
                 .contains("角色是否使用尚未获得的知识")
                 .contains("人物是否无铺垫出现")
                 .contains("当前地点或状态是否无原因跳变");
+    }
+
+    @Test
+    void reviewSystemPromptShouldCheckDialogueNaturalnessAndOverExplanation() {
+        String prompt = SystemPrompt.REVIEW_SYSTEM_PROMPT;
+
+        System.out.printf(
+                "REVIEW 对话与解释检查：dialogueNaturalness=%s, overExplanation=%s%n",
+                prompt.contains("Dialogue Naturalness"),
+                prompt.contains("Over-explanation")
+        );
+        assertThat(prompt)
+                .contains(
+                        "Dialogue Naturalness",
+                        "是否为了塞入背景或设定而出现报告式台词",
+                        "结合人物身份、年龄、性格和当下情境",
+                        "Over-explanation",
+                        "动作或台词已经表达情绪、动机和含义后，是否又重复追加解释、总结或剧情意义",
+                        "不……而是……",
+                        "没有……只是……",
+                        "不是……是……"
+                );
+    }
+
+    @Test
+    void reviserSystemPromptShouldPreferLocalRevisionAndPreserveStoryContract() {
+        String prompt = SystemPrompt.REVISER_SYSTEM_PROMPT;
+
+        System.out.printf(
+                "REVISE 局部改写边界：localRevision=%s, storyContractPreserved=%s%n",
+                prompt.contains("优先做局部改写或删减"),
+                prompt.contains("不改变剧情事实、人物关系、章节目标和世界设定")
+        );
+        assertThat(prompt)
+                .contains(
+                        "改稿优先做局部改写或删减",
+                        "只调整问题证据涉及的句段",
+                        "避免无关重写",
+                        "不改变剧情事实、人物关系、章节目标和世界设定"
+                );
     }
 
     private int countOccurrences(String text, String value) {
